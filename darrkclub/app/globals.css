@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+:root {
+  --background: #001623;
+  --foreground: #ffffff;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-mono: var(--font-space-mono);
+
+  /* Fhenix core */
+  --color-fhenix-cyan: #0ad9dc;
+  --color-fhenix-bg: #001623;
+  --color-fhenix-white: #ffffff;
+  --color-fhenix-card: #122530;
+  --color-fhenix-navy: #01243a;
+
+  /* Fhenix accents */
+  --color-fhenix-indigo: #7585ff;
+  --color-fhenix-purple: #c886fe;
+  --color-fhenix-orange: #ff703c;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
