@@ -26,6 +26,11 @@ const config: HardhatUserConfig = {
       chainId: 11155111,
       accounts: [process.env.PRIVATE_KEY!],
     },
+    arbitrumSepolia: {
+      url: "https://sepolia-rollup.arbitrum.io/rpc",
+      chainId: 421614,
+      accounts: [process.env.PRIVATE_KEY!],
+    },
   },
 };
 
