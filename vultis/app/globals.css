@@ -10,6 +10,7 @@
   --color-fhenix-purple: #c886fe;
   --color-fhenix-orange: #ff703c;
   --color-fhenix-muted: #64748b;
+  --font-montserrat: "var(--font-montserrat)";
 }
 
 :root {
@@ -20,5 +21,5 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-montserrat);
 }

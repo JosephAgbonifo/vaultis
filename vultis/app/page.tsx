@@ -1,5 +1,6 @@
 "use client";
 
+import React, { useMemo } from "react";
 import Link from "next/link";
 import { Navbar } from "@/components/NavBar";
 import { useReadContract } from "wagmi";
@@ -8,295 +9,472 @@ import {
   VAULTIS_ABI,
   VAULTIS_LENS_ADDRESS,
   VAULTIS_LENS_ABI,
+  GOVERNANCE_TOKEN_ADDRESS,
+  GOVERNANCE_TOKEN_ABI,
 } from "@/lib/config/contract";
 import { motion } from "framer-motion";
-import { Vault, ShieldCheck, Lock } from "lucide-react";
+import {
+  Vault,
+  ShieldCheck,
+  Lock,
+  Loader2,
+  ArrowRight,
+  CheckCircle2,
+  Zap,
+  Coins,
+} from "lucide-react";
+import { formatEther } from "viem";
 
-const fadeUp = {
-  hidden: { opacity: 0, y: 24 },
-  show: (i: number) => ({
-    opacity: 1,
-    y: 0,
-    transition: { delay: i * 0.1, duration: 0.5, ease: "easeOut" as const },
-  }),
-};
+// ─── LIFECYCLE STEPS ──────────────────────────────────────────────────────────
+// Continuous, per-proposal model — no global phases. Each proposal moves
+// through these three states independently, on its own expiry clock.
+const STEPS = [
+  {
+    step: "01",
+    title: "Propose",
+    desc: "Submit a proposal anytime, set its own expiration.",
+    Icon: Vault,
+  },
+  {
+    step: "02",
+    title: "Vote",
+    desc: "Cast encrypted FHE ballots until that proposal expires.",
+    Icon: ShieldCheck,
+  },
+  {
+    step: "03",
+    title: "Auto-Resolve",
+    desc: "Tally decrypts and treasury funds move on expiry — no admin step.",
+    Icon: Zap,
+  },
+];
 
+// ─── ANIMATED GRID BACKDROP ───────────────────────────────────────────────────
+function GridBackdrop() {
+  return (
+    <div
+      className="absolute inset-0 overflow-hidden pointer-events-none z-0"
+      aria-hidden
+    >
+      <svg
+        className="absolute inset-0 w-full h-full opacity-[0.035]"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          <pattern
+            id="vaultis-grid"
+            width="48"
+            height="48"
+            patternUnits="userSpaceOnUse"
+          >
+            <path
+              d="M 48 0 L 0 0 0 48"
+              fill="none"
+              stroke="#22d3ee"
+              strokeWidth="0.5"
+            />
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#vaultis-grid)" />
+      </svg>
+      <div className="absolute inset-0 bg-gradient-to-b from-fhenix-bg via-transparent to-fhenix-bg" />
+      <motion.div
+        className="absolute w-[600px] h-[600px] rounded-full"
+        style={{
+          background:
+            "radial-gradient(circle, rgba(34,211,238,0.07) 0%, transparent 70%)",
+          top: "-5%",
+          left: "-8%",
+        }}
+        animate={{ scale: [1, 1.12, 1], x: [0, 40, 0] }}
+        transition={{ duration: 22, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <motion.div
+        className="absolute w-[500px] h-[500px] rounded-full"
+        style={{
+          background:
+            "radial-gradient(circle, rgba(139,92,246,0.06) 0%, transparent 70%)",
+          bottom: "5%",
+          right: "-5%",
+        }}
+        animate={{ scale: [1, 1.08, 1], x: [0, -30, 0] }}
+        transition={{ duration: 28, repeat: Infinity, ease: "easeInOut" }}
+      />
+    </div>
+  );
+}
+
+type IconComponent = React.ComponentType<
+  React.SVGProps<SVGSVGElement> & { size?: number; strokeWidth?: number }
+>;
+
+function LifecycleStep({
+  step,
+  title,
+  desc,
+  Icon,
+  index,
+  total,
+}: {
+  step: string;
+  title: string;
+  desc: string;
+  Icon: IconComponent;
+  index: number;
+  total: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{
+        delay: 0.25 + index * 0.07,
+        duration: 0.6,
+        ease: [0.16, 1, 0.3, 1],
+      }}
+      className="relative flex flex-col"
+    >
+      {index < total - 1 && (
+        <div
+          className="hidden md:block absolute top-[28px] z-0"
+          style={{
+            left: "calc(50% + 36px)",
+            right: "-12px",
+            height: "1px",
+            background:
+              "linear-gradient(to right, rgba(34,211,238,0.25), rgba(34,211,238,0.05))",
+          }}
+        />
+      )}
+
+      <div
+        className="relative z-10 flex flex-col items-center text-center p-5 rounded-2xl border h-full transition-all duration-500 group cursor-default border-white/[0.05] hover:border-fhenix-cyan/20"
+        style={{
+          background: "rgba(255,255,255,0.01)",
+          backdropFilter: "blur(20px)",
+        }}
+      >
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 transition-all duration-300 bg-white/[0.04] border border-white/[0.06] group-hover:bg-fhenix-cyan/10 group-hover:border-fhenix-cyan/30">
+          <Icon
+            size={16}
+            className="text-white/50 group-hover:text-fhenix-cyan transition-colors duration-300"
+            strokeWidth={1.75}
+          />
+        </div>
+
+        <span className=" text-[9px] tracking-[0.2em] mb-1 text-fhenix-cyan/40">
+          {step}
+        </span>
+
+        <h3 className=" font-bold text-sm mb-1.5 text-white/70 group-hover:text-white transition-colors">
+          {title}
+        </h3>
+
+        <p className="text-[11px] leading-relaxed text-fhenix-muted">{desc}</p>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── PAGE ─────────────────────────────────────────────────────────────────────
 export default function Home() {
-  // getCurrentPhase lives on VaultisLens (moved off the core contract to
-  // stay under the 24KB EVM code-size limit).
-  const { data: phase } = useReadContract({
-    address: VAULTIS_LENS_ADDRESS,
-    abi: VAULTIS_LENS_ABI,
-    functionName: "getCurrentPhase",
-  });
-
-  // proposalCount stays on the core contract.
-  const { data: proposalCount } = useReadContract({
-    address: VAULTIS_ADDRESS,
+  const { data: proposalCount, isLoading: isCountLoading } = useReadContract({
+    address: VAULTIS_ADDRESS as `0x${string}`,
     abi: VAULTIS_ABI,
     functionName: "proposalCount",
   });
 
-  // Phase → CTA routing
-  // Proposal → propose (submit an allocation proposal)
-  // Voting   → vote    (cast your ballot)
-  // Tally    → results (waiting for decryption)
-  // Veto     → results (owner veto window open)
-  // Executed → results (see approved allocations)
-  const ctaHref =
-    phase === "Voting"
-      ? "/vote"
-      : phase === "Tally" || phase === "Veto" || phase === "Executed"
-      ? "/results"
-      : "/propose";
+  const { data: openProposalCount, isLoading: isOpenLoading } = useReadContract(
+    {
+      address: VAULTIS_ADDRESS as `0x${string}`,
+      abi: VAULTIS_ABI,
+      functionName: "openProposalCount",
+    }
+  );
 
-  const ctaLabel =
-    phase === "Voting"
-      ? "cast your vote"
-      : phase === "Tally"
-      ? "results pending"
-      : phase === "Veto"
-      ? "veto window open"
-      : phase === "Executed"
-      ? "see allocations"
-      : "submit a proposal";
+  const { data: treasuryBalance, isLoading: isTreasuryLoading } =
+    useReadContract({
+      address: VAULTIS_LENS_ADDRESS as `0x${string}`,
+      abi: VAULTIS_LENS_ABI,
+      functionName: "treasuryBalance",
+      query: { refetchInterval: 20_000 },
+    });
+
+  const { data: symbol } = useReadContract({
+    address: GOVERNANCE_TOKEN_ADDRESS as `0x${string}`,
+    abi: GOVERNANCE_TOKEN_ABI,
+    functionName: "symbol",
+  });
+
+  const formattedTreasury = useMemo(() => {
+    if (treasuryBalance === undefined) return null;
+    const n = parseFloat(formatEther(treasuryBalance as bigint));
+    return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }, [treasuryBalance]);
+
+  const isLoading = isCountLoading || isOpenLoading || isTreasuryLoading;
 
   return (
-    <div className="min-h-screen bg-fhenix-bg text-fhenix-white flex flex-col">
+    <div className="min-h-screen bg-fhenix-bg text-fhenix-white flex flex-col antialiased selection:bg-fhenix-cyan/20 selection:text-fhenix-white overflow-x-hidden">
       <Navbar />
 
-      <main className="flex-1 flex flex-col items-center justify-center px-6 py-20 relative overflow-hidden">
-        {/* Background grid */}
-        <div
-          className="absolute inset-0 pointer-events-none opacity-[0.03]"
-          style={{
-            backgroundImage: `linear-gradient(#0ad9dc 1px, transparent 1px), linear-gradient(90deg, #0ad9dc 1px, transparent 1px)`,
-            backgroundSize: "48px 48px",
-          }}
-        />
+      <main className="flex-1 flex flex-col items-center px-6 py-24 md:py-32 relative">
+        <GridBackdrop />
 
-        {/* Radial glow */}
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] rounded-full bg-fhenix-cyan/5 blur-[120px] pointer-events-none" />
-
-        {/* Eyebrow */}
-        <motion.div
-          custom={0}
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-          className="flex items-center gap-2 mb-8 text-[10px] font-mono tracking-[0.3em] text-fhenix-cyan/60 border border-fhenix-navy px-4 py-1.5"
-        >
-          <Lock size={9} />
-          FHE ENCRYPTED · TOKEN-WEIGHTED · ON-CHAIN
-        </motion.div>
-
-        {/* Title */}
-        <motion.div
-          custom={1}
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-          className="relative mb-6 select-none text-center"
-        >
-          <h1 className="text-7xl md:text-9xl font-mono font-bold tracking-tighter text-fhenix-white leading-none">
-            VAULTIS
-          </h1>
-
-          {/* Glitch layers */}
-          <div
-            className="absolute inset-0 flex flex-col items-center pointer-events-none"
-            aria-hidden
+        {/* ── HERO ── */}
+        <div className="relative z-10 w-full max-w-4xl text-center flex flex-col items-center mb-20">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            className="inline-flex items-center gap-2 mb-8 px-4 py-1.5 rounded-full border  text-[10px] tracking-[0.3em] font-semibold"
+            style={{
+              borderColor: "rgba(34,211,238,0.25)",
+              background: "rgba(34,211,238,0.04)",
+              color: "#22d3ee",
+              backdropFilter: "blur(12px)",
+            }}
           >
-            <span className="text-7xl md:text-9xl font-mono font-bold tracking-tighter text-fhenix-orange opacity-10 translate-x-[3px] -translate-y-[2px] leading-none">
+            <span className="w-1.5 h-1.5 rounded-full bg-fhenix-cyan animate-pulse" />
+            HOMOMORPHICALLY SEALED TREASURY
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+            className="relative mb-5 select-none"
+          >
+            <div
+              className="absolute inset-0 pointer-events-none z-10 overflow-hidden rounded-sm opacity-[0.15]"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.5) 3px, rgba(0,0,0,0.5) 4px)",
+              }}
+            />
+            <h1
+              className="text-[clamp(72px,13vw,128px)]  font-black leading-none"
+              style={{
+                background:
+                  "linear-gradient(160deg, #ffffff 0%, #cffafe 55%, #22d3ee 100%)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                filter: "drop-shadow(0 0 56px rgba(34,211,238,0.2))",
+                letterSpacing: "-0.04em",
+              }}
+            >
               VAULTIS
-            </span>
-          </div>
-        </motion.div>
+            </h1>
+            <div
+              aria-hidden
+              className="absolute inset-0 flex items-center justify-center blur-3xl opacity-[0.07] -z-10 pointer-events-none"
+            >
+              <span
+                className="text-[clamp(72px,13vw,128px)]  font-black text-fhenix-cyan"
+                style={{ letterSpacing: "-0.04em" }}
+              >
+                VAULTIS
+              </span>
+            </div>
+          </motion.div>
 
-        {/* Taglines */}
-        <motion.p
-          custom={2}
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-          className="text-fhenix-white/60 text-sm md:text-base max-w-sm text-center mb-2 leading-relaxed font-mono"
-        >
-          Private DAO treasury management.
-        </motion.p>
-        <motion.p
-          custom={3}
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-          className="text-fhenix-muted text-xs md:text-sm max-w-xs text-center mb-14 leading-relaxed"
-        >
-          The market can&apos;t front-run what it can&apos;t see.{" "}
-          <span className="text-fhenix-purple/70">
-            Runway, allocations, and unlocks — encrypted on-chain.
-          </span>
-        </motion.p>
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3, duration: 0.7 }}
+            className=" text-sm md:text-base font-semibold tracking-widest mb-3"
+            style={{ color: "rgba(255,255,255,0.8)", letterSpacing: "0.08em" }}
+          >
+            Next-generation private cryptographic governance.
+          </motion.p>
 
-        {/* ── How It Works ─────────────────────────────── */}
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.45, duration: 0.7 }}
+            className=" text-xs md:text-sm max-w-lg leading-relaxed text-fhenix-muted"
+          >
+            Submit allocation proposals anytime. Vote with FHE-encrypted weight.
+            The treasury pays out — or doesn&apos;t — the moment each proposal
+            expires, with no admin in the loop.
+          </motion.p>
+        </div>
+
+        {/* ── LIFECYCLE ── */}
         <motion.section
-          custom={7}
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-          className="w-full max-w-4xl mt-32 mb-8"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3, duration: 0.7 }}
+          className="relative z-10 w-full max-w-4xl mb-16"
         >
-          {/* Section label */}
-          <div className="flex items-center gap-4 mb-10">
-            <div className="h-px flex-1 bg-fhenix-navy" />
-            <span className="text-[10px] font-mono tracking-[0.3em] text-fhenix-cyan/40">
-              HOW IT WORKS
+          <div className="flex items-center gap-3 mb-5">
+            <span className=" text-[9px] tracking-[0.3em] font-bold text-fhenix-cyan/50">
+              LIFECYCLE
             </span>
-            <div className="h-px flex-1 bg-fhenix-navy" />
+            <div className="flex-1 h-px bg-white/[0.05]" />
           </div>
 
-          {/* Steps */}
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-0 border border-fhenix-navy bg-fhenix-card">
-            {[
-              {
-                step: "01",
-                title: "Propose",
-                desc: "Submit an allocation proposal — recipient, token, unlock date. Rationale is public; amount is encrypted.",
-                phase: "Proposal",
-              },
-              {
-                step: "02",
-                title: "Vote",
-                desc: "Token holders vote FOR or AGAINST. Weight is your balance, FHE-encrypted on-chain.",
-                phase: "Voting",
-              },
-              {
-                step: "03",
-                title: "Tally",
-                desc: "Votes are computed homomorphically. Individual positions stay invisible, forever.",
-                phase: "Tally",
-              },
-              {
-                step: "04",
-                title: "Veto",
-                desc: "A short owner-only window to block bad-faith proposals before execution.",
-                phase: "Veto",
-              },
-              {
-                step: "05",
-                title: "Execute",
-                desc: "Approved allocations are published on-chain. Quorum + majority, decided transparently.",
-                phase: "Executed",
-              },
-            ].map(({ step, title, desc, phase: stepPhase }, i, arr) => (
-              <div key={step} className="flex">
-                <div
-                  className={`flex flex-col px-6 py-8 gap-3 flex-1 transition-colors duration-300 ${
-                    phase === stepPhase ? "bg-fhenix-cyan/5" : ""
-                  }`}
-                >
-                  {/* Step number */}
-                  <span className="text-[10px] font-mono text-fhenix-cyan/30 tracking-[0.3em]">
-                    {step}
-                  </span>
-
-                  {/* Active indicator */}
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-sm text-fhenix-white tracking-wide">
-                      {title}
-                    </span>
-                    {phase === stepPhase && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-fhenix-cyan animate-pulse" />
-                    )}
-                  </div>
-
-                  {/* Description */}
-                  <p className="text-fhenix-muted text-xs leading-relaxed">
-                    {desc}
-                  </p>
-                </div>
-
-                {/* Divider */}
-                {i < arr.length - 1 && (
-                  <div className="w-px bg-fhenix-navy self-stretch hidden md:block" />
-                )}
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {STEPS.map((s, i) => (
+              <LifecycleStep
+                key={s.step}
+                {...s}
+                index={i}
+                total={STEPS.length}
+              />
             ))}
-          </div>
-
-          {/* Bottom note */}
-          <div className="mt-4 text-center text-[10px] font-mono text-fhenix-navy tracking-widest">
-            POWERED BY FULLY HOMOMORPHIC ENCRYPTION · FHENIX PROTOCOL
           </div>
         </motion.section>
 
-        {/* Stats */}
+        {/* ── METRICS + CTA ── */}
         <motion.div
-          custom={4}
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-          className="flex gap-0 mb-14 border border-fhenix-navy bg-fhenix-card"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5, duration: 0.7 }}
+          className="relative z-10 w-full max-w-5xl"
         >
-          {[
-            {
-              icon: <Vault size={13} />,
-              value:
-                proposalCount !== undefined ? proposalCount.toString() : "—",
-              label: "PROPOSALS",
-            },
-            {
-              icon: <ShieldCheck size={13} />,
-              value: (phase as string) ?? "—",
-              label: "PHASE",
-            },
-          ].map(({ icon, value, label }, i, arr) => (
-            <div key={label} className="flex">
-              <div className="flex flex-col items-center justify-center px-10 py-6 gap-2">
-                <span className="text-fhenix-cyan/40">{icon}</span>
-                <div className="text-2xl font-mono font-bold text-fhenix-white">
-                  {value}
-                </div>
-                <div className="text-[10px] text-fhenix-muted tracking-[0.2em]">
-                  {label}
-                </div>
+          <div className="flex items-center gap-3 mb-5">
+            <span className=" text-[9px] tracking-[0.3em] font-bold text-fhenix-cyan/50">
+              SYSTEM
+            </span>
+            <div className="flex-1 h-px bg-white/[0.05]" />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            {/* Metric: Treasury */}
+            <div
+              className="lg:col-span-4 flex flex-col justify-between p-6 rounded-2xl border"
+              style={{
+                background: "rgba(255,255,255,0.01)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                backdropFilter: "blur(20px)",
+              }}
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <Coins size={13} className="text-fhenix-cyan opacity-60" />
+                <span className=" text-[10px] tracking-widest text-fhenix-muted">
+                  TREASURY BALANCE
+                </span>
               </div>
-              {i < arr.length - 1 && (
-                <div className="w-px bg-fhenix-navy self-stretch" />
-              )}
+              <div className="flex items-baseline gap-2">
+                <span className=" text-4xl font-black text-white">
+                  {isTreasuryLoading ? (
+                    <Loader2 size={20} className="animate-spin opacity-30" />
+                  ) : (
+                    formattedTreasury ?? "0"
+                  )}
+                </span>
+                <span className="text-xs text-fhenix-muted/50">
+                  {(symbol as string) ?? "VLTG"}
+                </span>
+              </div>
             </div>
-          ))}
+
+            {/* Metric: Open proposals */}
+            <div
+              className="lg:col-span-4 flex flex-col justify-between p-6 rounded-2xl border"
+              style={{
+                background: "rgba(255,255,255,0.01)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                backdropFilter: "blur(20px)",
+              }}
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <Vault size={13} className="text-fhenix-cyan opacity-60" />
+                <span className=" text-[10px] tracking-widest text-fhenix-muted">
+                  OPEN / TOTAL PROPOSALS
+                </span>
+              </div>
+              <span className=" text-4xl font-black text-white">
+                {isLoading ? (
+                  <Loader2 size={20} className="animate-spin opacity-30" />
+                ) : (
+                  <>
+                    {openProposalCount?.toString() ?? "0"}
+                    <span className="text-lg text-fhenix-muted/40">
+                      {" "}
+                      / {proposalCount?.toString() ?? "0"}
+                    </span>
+                  </>
+                )}
+              </span>
+            </div>
+
+            {/* CTA */}
+            <div className="lg:col-span-4 flex">
+              <Link
+                href="/proposals"
+                className="group relative w-full hidden md:flex items-center justify-center gap-3 rounded-2xl border border-fhenix-cyan text-fhenix-cyan  text-[11px] tracking-[0.2em] font-bold transition-all duration-300 overflow-hidden hover:bg-fhenix-cyan hover:text-fhenix-bg hover:shadow-[0_0_40px_rgba(34,211,238,0.3)]"
+                style={{ backdropFilter: "blur(20px)" }}
+              >
+                <span className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/10 to-transparent pointer-events-none" />
+                <Lock
+                  size={13}
+                  className="transition-transform group-hover:scale-110"
+                />
+                <span>VIEW PROPOSALS</span>
+                <ArrowRight
+                  size={13}
+                  className="transition-transform group-hover:translate-x-1"
+                />
+              </Link>
+            </div>
+            <div className="lg:col-span-4 flex">
+              <Link
+                href="/proposals"
+                className="group relative w-full flex h-12 md:hidden items-center justify-center gap-3 rounded-2xl border border-fhenix-cyan text-fhenix-cyan  text-[11px] tracking-[0.2em] font-bold transition-all duration-300 overflow-hidden hover:bg-fhenix-cyan hover:text-fhenix-bg hover:shadow-[0_0_40px_rgba(34,211,238,0.3)]"
+                style={{ backdropFilter: "blur(20px)" }}
+              >
+                <span className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/10 to-transparent pointer-events-none" />
+                <Lock
+                  size={13}
+                  className="transition-transform group-hover:scale-110"
+                />
+                <span>VIEW PROPOSALS</span>
+                <ArrowRight
+                  size={13}
+                  className="transition-transform group-hover:translate-x-1"
+                />
+              </Link>
+            </div>
+            <div className="lg:col-span-12 flex">
+              <Link
+                href="/propose"
+                className="group relative w-full flex h-12 items-center justify-center gap-3 rounded-2xl border border-fhenix-cyan text-fhenix-cyan  text-[11px] tracking-[0.2em] font-bold transition-all duration-300 overflow-hidden hover:bg-fhenix-cyan hover:text-fhenix-bg hover:shadow-[0_0_40px_rgba(34,211,238,0.3)]"
+                style={{ backdropFilter: "blur(20px)" }}
+              >
+                <span className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/10 to-transparent pointer-events-none" />
+                <Lock
+                  size={13}
+                  className="transition-transform group-hover:scale-110"
+                />
+                <span>PROPOSE</span>
+                <ArrowRight
+                  size={13}
+                  className="transition-transform group-hover:translate-x-1"
+                />
+              </Link>
+            </div>
+          </div>
         </motion.div>
 
-        {/* CTA */}
+        {/* ── FOOTER META ── */}
         <motion.div
-          custom={5}
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-        >
-          <Link
-            href={ctaHref}
-            className="group relative inline-flex items-center gap-3 border border-fhenix-cyan text-fhenix-cyan px-10 py-3.5 text-xs font-mono tracking-[0.2em] hover:bg-fhenix-cyan hover:text-fhenix-bg transition-all duration-300"
-          >
-            {/* shimmer sweep */}
-            <span className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/10 to-transparent pointer-events-none" />
-            <Lock size={11} />
-            {ctaLabel.toUpperCase()}
-          </Link>
-        </motion.div>
-
-        {/* Footer flavor */}
-        <motion.div
-          custom={6}
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-          className="mt-20 flex items-center gap-3 text-fhenix-navy text-[10px] tracking-widest font-mono select-none"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.8, duration: 0.8 }}
+          className="relative z-10 mt-20 flex flex-wrap items-center justify-center gap-4  text-[9px] tracking-[0.3em] select-none text-fhenix-white/20"
         >
           <span>0x7a3f···e91c</span>
-          <span className="w-1 h-1 rounded-full bg-fhenix-navy" />
-          <span>FHE ENCRYPTED</span>
-          <span className="w-1 h-1 rounded-full bg-fhenix-navy" />
-          <span>SEPOLIA</span>
+          <span className="w-1 h-1 rounded-full bg-white/20" />
+          <span className="flex items-center gap-1.5">
+            <CheckCircle2 size={10} />
+            FULLY HOMOMORPHIC ENCRYPTION SECURED
+          </span>
+          <span className="w-1 h-1 rounded-full bg-white/20" />
+          <span className="text-fhenix-cyan/35">SEPOLIA TESTNET</span>
+          <span className="w-1 h-1 rounded-full bg-white/20" />
+          <span>COFHE · FHENIX PROTOCOL</span>
         </motion.div>
       </main>
     </div>

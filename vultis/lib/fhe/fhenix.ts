@@ -67,54 +67,51 @@ export async function connectCofhe(
   return client;
 }
 
-// ─── encryptVoteWeights ───────────────────────────────────────────────────────
-// FIXED: pass contractAddress to encryptInputs so the CoFHE relay
-// signs ciphertexts for VAULTIS_ADDRESS specifically.
-// Without this the signature is bound to the wrong target and the
-// contract's FHE.asEuint64() call throws InvalidSigner.
+// ─── encryptVoteWeight ────────────────────────────────────────────────────────
+// One InEuint64 pair per proposal, matching Vaultis.castBallot's signature.
+//
+// tokenBalance is the caller's raw balanceOf (in wei). We divide by 1e18
+// before encrypting so the FHE tally stays within uint64 range — two voters
+// at 10 VLTG each would produce 20e18 raw which overflows uint64
+// (max ≈ 18.4e18) and silently corrupts the tally.
 
-export async function encryptVoteWeights(
-  proposalIds: number[],
-  forChoices: boolean[],
-  tokenBalance: bigint = BigInt(1)
+export async function encryptVoteWeight(
+  forChoice: boolean,
+  tokenBalance: bigint
 ): Promise<{
-  forWeights: any[];
-  againstWeights: any[];
+  forWeight: any;
+  againstWeight: any;
 }> {
   if (typeof window === "undefined") {
-    return { forWeights: [], againstWeights: [] };
+    return { forWeight: undefined, againstWeight: undefined };
   }
 
-  if (proposalIds.length !== forChoices.length) {
-    throw new Error("proposalIds and forChoices must be the same length");
+  // Convert from wei to whole tokens to stay within uint64 range.
+  const voteWeight = tokenBalance / BigInt(1e18);
+
+  console.log("encryptVoteWeight", { forChoice, tokenBalance, voteWeight });
+
+  if (voteWeight <= 0n) {
+    throw new Error("Cannot vote with zero token balance");
   }
 
   const { client, Encryptable } = await getCachedClient();
 
-  // Build flat input array: [for0, against0, for1, against1, ...]
-  const inputs: any[] = [];
-  for (let i = 0; i < proposalIds.length; i++) {
-    const isFor = forChoices[i];
-    inputs.push(Encryptable.uint64(isFor ? tokenBalance : BigInt(0)));
-    inputs.push(Encryptable.uint64(isFor ? BigInt(0) : tokenBalance));
-  }
+  const inputs = [
+    Encryptable.uint64(forChoice ? voteWeight : 0n),
+    Encryptable.uint64(forChoice ? 0n : voteWeight),
+  ];
 
-  // THE FIX: tell the SDK which contract will consume these ciphertexts.
-  // The relay embeds this address in the signature — it must match the
-  // contract address that calls FHE.asEuint64(), which is VAULTIS_ADDRESS.
+  // Bind ciphertexts to VAULTIS_ADDRESS so the contract's FHE.asEuint64()
+  // call doesn't throw InvalidSigner.
   const encrypted = await client
     .encryptInputs(inputs, VAULTIS_ADDRESS)
     .execute();
 
-  // De-interleave back into parallel arrays
-  const forWeights: any[] = [];
-  const againstWeights: any[] = [];
-  for (let i = 0; i < proposalIds.length; i++) {
-    forWeights.push(encrypted[i * 2]);
-    againstWeights.push(encrypted[i * 2 + 1]);
-  }
-
-  return { forWeights, againstWeights };
+  return {
+    forWeight: encrypted[0],
+    againstWeight: encrypted[1],
+  };
 }
 
 // ─── decryptTally ─────────────────────────────────────────────────────────────

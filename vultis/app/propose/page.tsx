@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { useAccount, useReadContract } from "wagmi";
 import { useSignTypedData } from "wagmi";
 import { arbitrumSepolia } from "viem/chains";
@@ -10,6 +11,7 @@ import {
   VAULTIS_ABI,
   VAULTIS_LENS_ADDRESS,
   VAULTIS_LENS_ABI,
+  GOVERNANCE_TOKEN_ADDRESS,
   CATEGORY_OPTIONS,
   CATEGORY_LABELS,
 } from "@/lib/config/contract";
@@ -21,6 +23,7 @@ import {
   FileText,
   Layers,
 } from "lucide-react";
+import { parseEther } from "viem";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -31,7 +34,6 @@ const fadeUp = {
   }),
 };
 
-// EIP-712 domain + types — must match relay/propose/route.ts exactly
 const DOMAIN = {
   name: "Vaultis",
   version: "1",
@@ -39,30 +41,130 @@ const DOMAIN = {
   verifyingContract: VAULTIS_ADDRESS,
 } as const;
 
+// token is signed as part of the message (matches the deployed contract's
+// ABI) but is never user-editable — it's always GOVERNANCE_TOKEN_ADDRESS,
+// since VLTG is the only asset Vaultis pays out in.
 const PROPOSE_TYPES = {
   Propose: [
-    { name: "cycleId", type: "uint256" },
     { name: "recipient", type: "address" },
     { name: "token", type: "address" },
-    { name: "encAmountHint", type: "uint64" },
-    { name: "unlockAt", type: "uint64" },
+    { name: "amount", type: "uint256" },
+    { name: "expiresAt", type: "uint64" },
     { name: "title", type: "string" },
     { name: "rationale", type: "string" },
     { name: "category", type: "uint8" },
   ],
 } as const;
 
-// Native token sentinel
-const NATIVE_TOKEN = "0x0000000000000000000000000000000000000000";
+const MAX_OPEN_PROPOSALS = 10;
+
+// ─── SHARED FIELD WRAPPER ─────────────────────────────────────────────────────
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div>
+      <label className="flex items-center gap-2 text-[9px] tracking-[0.25em] text-fhenix-cyan/50 mb-2 font-semibold">
+        {label}
+        {hint && (
+          <span className="text-fhenix-muted/50 normal-case tracking-normal font-normal">
+            {hint}
+          </span>
+        )}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+// ─── INPUT STYLES ─────────────────────────────────────────────────────────────
+const inputCls =
+  "w-full bg-fhenix-bg border border-fhenix-navy text-fhenix-white text-sm px-4 py-3 rounded-xl focus:outline-none focus:border-fhenix-cyan/50 focus:ring-1 focus:ring-fhenix-cyan/10 placeholder:text-fhenix-navy/60 transition-all duration-200";
+
+// ─── GRID BACKDROP ────────────────────────────────────────────────────────────
+function GridBackdrop() {
+  return (
+    <div
+      className="absolute inset-0 overflow-hidden pointer-events-none z-0"
+      aria-hidden
+    >
+      <svg
+        className="absolute inset-0 w-full h-full opacity-[0.025]"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          <pattern
+            id="propose-grid"
+            width="48"
+            height="48"
+            patternUnits="userSpaceOnUse"
+          >
+            <path
+              d="M 48 0 L 0 0 0 48"
+              fill="none"
+              stroke="#22d3ee"
+              strokeWidth="0.5"
+            />
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#propose-grid)" />
+      </svg>
+      <div className="absolute inset-0 bg-gradient-to-b from-fhenix-bg via-transparent to-fhenix-bg" />
+      <div
+        className="absolute w-[500px] h-[500px] rounded-full pointer-events-none"
+        style={{
+          background:
+            "radial-gradient(circle, rgba(34,211,238,0.055) 0%, transparent 70%)",
+          top: "-10%",
+          left: "50%",
+          transform: "translateX(-50%)",
+        }}
+      />
+    </div>
+  );
+}
+
+// ─── GLASS CARD ───────────────────────────────────────────────────────────────
+function GlassCard({
+  children,
+  className = "",
+  highlight = false,
+}: {
+  children?: ReactNode;
+  className?: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-2xl border ${className}`}
+      style={{
+        background: highlight
+          ? "rgba(34,211,238,0.02)"
+          : "rgba(255,255,255,0.01)",
+        border: highlight
+          ? "1px solid rgba(34,211,238,0.18)"
+          : "1px solid rgba(255,255,255,0.06)",
+        backdropFilter: "blur(20px)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
 export default function ProposePage() {
   const { address, isConnected } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
 
   const [recipient, setRecipient] = useState("");
-  const [token, setToken] = useState(NATIVE_TOKEN);
-  const [amountHint, setAmountHint] = useState("");
-  const [unlockDate, setUnlockDate] = useState("");
+  const [amount, setAmount] = useState("");
+  const [expiresDate, setExpiresDate] = useState("");
   const [title, setTitle] = useState("");
   const [rationale, setRationale] = useState("");
   const [category, setCategory] = useState(0);
@@ -70,16 +172,10 @@ export default function ProposePage() {
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState("");
 
-  const { data: cycleId } = useReadContract({
+  const { data: openProposalCount } = useReadContract({
     address: VAULTIS_ADDRESS,
     abi: VAULTIS_ABI,
-    functionName: "cycleId",
-  });
-
-  const { data: currentPhase } = useReadContract({
-    address: VAULTIS_LENS_ADDRESS,
-    abi: VAULTIS_LENS_ABI,
-    functionName: "getCurrentPhase",
+    functionName: "openProposalCount",
   });
 
   const { data: rawProposals, refetch: refetchProposals } = useReadContract({
@@ -88,54 +184,60 @@ export default function ProposePage() {
     functionName: "getAllProposals",
   });
 
-  type Proposal = {
+  type ProposalView = {
+    id: bigint;
     recipient: string;
-    token: string;
-    encAmountHint: bigint;
-    unlockAt: bigint;
+    amount: bigint;
+    expiresAt: bigint;
     title: string;
     rationale: string;
     category: number;
     proposer: string;
+    displayStatus: number;
+    finalForCount: bigint;
+    finalAgainstCount: bigint;
   };
 
-  const proposals = (rawProposals as Proposal[] | undefined) ?? [];
+  const proposals = (rawProposals as ProposalView[] | undefined) ?? [];
+  const atCap = Number(openProposalCount ?? 0) >= MAX_OPEN_PROPOSALS;
 
   const handlePropose = async () => {
-    if (!address || !cycleId || !title || !recipient || !unlockDate) return;
+    if (!address || !title || !recipient || !expiresDate || !amount) return;
     setError("");
 
-    // Parse unlock timestamp
-    const unlockTs = Math.floor(new Date(unlockDate).getTime() / 1000);
-    if (unlockTs <= Math.floor(Date.now() / 1000)) {
-      setError("Unlock date must be in the future");
+    const expiresTs = Math.floor(new Date(expiresDate).getTime() / 1000);
+    if (expiresTs <= Math.floor(Date.now() / 1000)) {
+      setError("Expiration must be in the future");
       return;
     }
-
-    // Validate address format
     if (!/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
       setError("Invalid recipient address");
       return;
     }
 
-    const hintBigInt = BigInt(Math.round(Number(amountHint) || 0));
+    const amountBigInt = BigInt(Math.round(Number(amount) || 0));
+    if (amountBigInt <= BigInt(0)) {
+      setError("Amount must be greater than zero");
+      return;
+    }
 
     try {
       setIsPending(true);
+
+      const amountString = amountBigInt.toString();
 
       const signature = await signTypedDataAsync({
         domain: DOMAIN,
         types: PROPOSE_TYPES,
         primaryType: "Propose",
         message: {
-          cycleId: BigInt(cycleId as bigint),
           recipient: recipient as `0x${string}`,
-          token: token as `0x${string}`,
-          encAmountHint: hintBigInt,
-          unlockAt: BigInt(unlockTs),
+          token: GOVERNANCE_TOKEN_ADDRESS,
+          amount: parseEther(amountString),
+          expiresAt: BigInt(expiresTs),
           title: title.trim(),
           rationale: rationale.trim(),
-          category: category,
+          category,
         },
       });
 
@@ -143,11 +245,10 @@ export default function ProposePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cycleId: (cycleId as bigint).toString(),
           recipient: recipient.trim(),
-          token: token.trim(),
-          encAmountHint: hintBigInt.toString(),
-          unlockAt: unlockTs.toString(),
+          token: GOVERNANCE_TOKEN_ADDRESS,
+          amount: parseEther(amountString).toString(),
+          expiresAt: expiresTs.toString(),
           title: title.trim(),
           rationale: rationale.trim(),
           category,
@@ -161,9 +262,8 @@ export default function ProposePage() {
 
       setSubmitted(true);
       setRecipient("");
-      setToken(NATIVE_TOKEN);
-      setAmountHint("");
-      setUnlockDate("");
+      setAmount("");
+      setExpiresDate("");
       setTitle("");
       setRationale("");
       setCategory(0);
@@ -176,312 +276,326 @@ export default function ProposePage() {
     }
   };
 
-  const notProposalPhase = currentPhase !== "Proposal";
-
   return (
-    <div className="min-h-screen bg-fhenix-bg text-fhenix-white flex flex-col">
+    <div className="min-h-screen bg-fhenix-bg text-fhenix-white flex flex-col antialiased overflow-x-hidden">
       <Navbar />
 
-      <main className="flex-1 max-w-2xl mx-auto w-full px-6 py-14 relative">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-64 bg-fhenix-cyan/5 blur-[100px] pointer-events-none rounded-full" />
+      <main className="relative flex-1 max-w-2xl mx-auto w-full px-6 py-16">
+        <GridBackdrop />
 
-        {/* Page header */}
+        {/* ── PAGE HEADER ── */}
         <motion.div
           custom={0}
           variants={fadeUp}
           initial="hidden"
           animate="show"
-          className="mb-10"
+          className="relative z-10 mb-10"
         >
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-[10px] font-mono tracking-[0.3em] text-fhenix-cyan/50 border border-fhenix-navy px-2.5 py-1">
-              PHASE 01
-            </span>
-            <span className="text-[10px] font-mono tracking-[0.3em] text-fhenix-muted flex items-center gap-1.5">
+          <div className="flex items-center gap-2.5 mb-4">
+            <span className="flex items-center gap-1.5 text-[9px] tracking-[0.2em] text-fhenix-muted">
               <Lock size={9} /> ANONYMOUS
             </span>
           </div>
-          <h1 className="text-4xl font-mono font-bold tracking-tight text-fhenix-white">
+
+          <h1
+            className="text-4xl md:text-5xl font-black tracking-tight text-fhenix-white mb-3"
+            style={{ letterSpacing: "-0.02em" }}
+          >
             Submit Proposal
           </h1>
-          <p className="text-fhenix-muted text-sm mt-2 max-w-sm leading-relaxed">
-            Allocation requests are routed through the relayer.{" "}
-            <span className="text-fhenix-purple/70">
-              The market sees nothing until the cycle executes.
+          <p className="text-fhenix-muted text-sm max-w-sm leading-relaxed font-mono">
+            Submit anytime — set your own expiration, then it&apos;s open for
+            voting until that deadline.{" "}
+            <span style={{ color: "rgba(139,92,246,0.75)" }}>
+              The market sees nothing until it resolves.
             </span>
           </p>
         </motion.div>
 
-        {/* Not connected */}
-        <AnimatePresence>
-          {!isConnected && (
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="border border-fhenix-navy bg-fhenix-card px-6 py-5 text-fhenix-muted text-sm mb-8 flex items-center gap-3 font-mono"
-            >
-              <Lock size={14} className="text-fhenix-cyan/40 shrink-0" />
-              connect your wallet to submit a proposal
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div className="relative z-10 space-y-4">
+          {/* ── NOT CONNECTED ── */}
+          <AnimatePresence>
+            {!isConnected && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+              >
+                <GlassCard className="px-5 py-4 flex items-center gap-3">
+                  <Lock size={13} className="text-fhenix-cyan/40 shrink-0" />
+                  <p className="text-fhenix-muted text-sm font-mono">
+                    connect your wallet to submit a proposal
+                  </p>
+                </GlassCard>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-        {/* Wrong phase */}
-        <AnimatePresence>
-          {isConnected && notProposalPhase && !submitted && (
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="border border-fhenix-navy bg-fhenix-card px-6 py-5 text-fhenix-muted text-sm mb-8 flex items-center gap-3 font-mono"
-            >
-              <Lock size={14} className="text-fhenix-cyan/40 shrink-0" />
-              proposal window is closed — current phase:{" "}
-              <span className="text-fhenix-cyan/60">
-                {currentPhase ?? "..."}
-              </span>
-            </motion.div>
-          )}
-        </AnimatePresence>
+          {/* ── AT CAP ── */}
+          <AnimatePresence>
+            {isConnected && atCap && !submitted && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+              >
+                <GlassCard className="px-5 py-4 flex items-center gap-3">
+                  <Lock size={13} className="text-fhenix-cyan/40 shrink-0" />
+                  <p className="text-fhenix-muted text-sm font-mono">
+                    {MAX_OPEN_PROPOSALS} open proposals already pending — wait
+                    for one to resolve before submitting another
+                  </p>
+                </GlassCard>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-        {/* Proposal form */}
-        <AnimatePresence>
-          {isConnected && !notProposalPhase && !submitted && (
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="border border-fhenix-navy bg-fhenix-card px-6 py-6 mb-8"
-            >
-              <div className="flex items-center gap-2 mb-6">
-                <ShieldCheck size={13} className="text-fhenix-cyan/50" />
-                <p className="text-[10px] font-mono tracking-[0.2em] text-fhenix-muted">
-                  ALLOCATION PROPOSAL · RELAYER ANONYMOUS
-                </p>
-              </div>
-
-              <div className="space-y-5">
-                {/* Title */}
-                <div>
-                  <label className="text-[10px] font-mono text-fhenix-muted block mb-2 tracking-[0.2em]">
-                    PROPOSAL TITLE
-                  </label>
-                  <input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g. Q3 Core Dev Runway"
-                    className="w-full bg-fhenix-bg border border-fhenix-navy text-fhenix-white text-sm font-mono px-4 py-3 focus:outline-none focus:border-fhenix-cyan/50 placeholder:text-fhenix-navy transition-colors"
-                  />
-                </div>
-
-                {/* Recipient */}
-                <div>
-                  <label className="text-[10px] font-mono text-fhenix-muted block mb-2 tracking-[0.2em]">
-                    RECIPIENT ADDRESS
-                  </label>
-                  <input
-                    value={recipient}
-                    onChange={(e) => setRecipient(e.target.value)}
-                    placeholder="0x..."
-                    className="w-full bg-fhenix-bg border border-fhenix-navy text-fhenix-white text-sm font-mono px-4 py-3 focus:outline-none focus:border-fhenix-cyan/50 placeholder:text-fhenix-navy transition-colors"
-                  />
-                </div>
-
-                {/* Token + Amount hint */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-mono text-fhenix-muted block mb-2 tracking-[0.2em]">
-                      TOKEN ADDRESS
-                      <span className="opacity-40 normal-case tracking-normal ml-1">
-                        (0x0 = native)
-                      </span>
-                    </label>
-                    <input
-                      value={token}
-                      onChange={(e) => setToken(e.target.value)}
-                      placeholder="0x0000...0000"
-                      className="w-full bg-fhenix-bg border border-fhenix-navy text-fhenix-white text-sm font-mono px-4 py-3 focus:outline-none focus:border-fhenix-cyan/50 placeholder:text-fhenix-navy transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono text-fhenix-muted block mb-2 tracking-[0.2em]">
-                      AMOUNT HINT
-                      <span className="opacity-40 normal-case tracking-normal ml-1">
-                        (base units)
-                      </span>
-                    </label>
-                    <input
-                      value={amountHint}
-                      onChange={(e) => setAmountHint(e.target.value)}
-                      placeholder="e.g. 50000"
-                      type="number"
-                      min="0"
-                      className="w-full bg-fhenix-bg border border-fhenix-navy text-fhenix-white text-sm font-mono px-4 py-3 focus:outline-none focus:border-fhenix-cyan/50 placeholder:text-fhenix-navy transition-colors"
-                    />
-                  </div>
-                </div>
-
-                {/* Unlock date + Category */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-mono text-fhenix-muted block mb-2 tracking-[0.2em]">
-                      UNLOCK DATE
-                    </label>
-                    <input
-                      value={unlockDate}
-                      onChange={(e) => setUnlockDate(e.target.value)}
-                      type="datetime-local"
-                      className="w-full bg-fhenix-bg border border-fhenix-navy text-fhenix-white text-sm font-mono px-4 py-3 focus:outline-none focus:border-fhenix-cyan/50 transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-mono text-fhenix-muted block mb-2 tracking-[0.2em]">
-                      CATEGORY
-                    </label>
-                    <select
-                      value={category}
-                      onChange={(e) => setCategory(Number(e.target.value))}
-                      className="w-full bg-fhenix-bg border border-fhenix-navy text-fhenix-white text-sm font-mono px-4 py-3 focus:outline-none focus:border-fhenix-cyan/50 transition-colors"
+          {/* ── FORM ── */}
+          <AnimatePresence>
+            {isConnected && !atCap && !submitted && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+              >
+                <GlassCard className="px-6 py-6">
+                  {/* form header */}
+                  <div className="flex items-center gap-2 mb-6 pb-5 border-b border-white/[0.05]">
+                    <div
+                      className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                      style={{
+                        background: "rgba(34,211,238,0.08)",
+                        border: "1px solid rgba(34,211,238,0.18)",
+                      }}
                     >
-                      {CATEGORY_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
+                      <ShieldCheck size={13} className="text-fhenix-cyan" />
+                    </div>
+                    <p className="text-[9px] tracking-[0.2em] text-fhenix-muted font-semibold">
+                      ALLOCATION PROPOSAL · RELAYER ANONYMOUS
+                    </p>
                   </div>
-                </div>
 
-                {/* Rationale */}
-                <div>
-                  <label className="text-[10px] font-mono text-fhenix-muted block mb-2 tracking-[0.2em]">
-                    RATIONALE
-                    <span className="opacity-40 normal-case tracking-normal ml-1">
-                      stored on-chain, always public
-                    </span>
-                  </label>
-                  <textarea
-                    value={rationale}
-                    onChange={(e) => setRationale(e.target.value)}
-                    placeholder="Why should the DAO fund this? What's the expected outcome?"
-                    rows={3}
-                    className="w-full bg-fhenix-bg border border-fhenix-navy text-fhenix-white text-sm font-mono px-4 py-3 focus:outline-none focus:border-fhenix-cyan/50 placeholder:text-fhenix-navy transition-colors resize-none"
-                  />
-                </div>
+                  <div className="space-y-5">
+                    {/* Title */}
+                    <Field label="PROPOSAL TITLE">
+                      <input
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder="e.g. Q3 Core Dev Runway"
+                        className={inputCls}
+                      />
+                    </Field>
 
-                {/* Error */}
-                <AnimatePresence>
-                  {error && (
-                    <motion.p
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="text-[10px] font-mono text-red-400"
+                    {/* Recipient */}
+                    <Field label="RECIPIENT ADDRESS">
+                      <input
+                        value={recipient}
+                        onChange={(e) => setRecipient(e.target.value)}
+                        placeholder="0x..."
+                        className={inputCls}
+                      />
+                    </Field>
+
+                    {/* Amount + Expiry */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <Field label="AMOUNT" hint="(VLTG, base units)">
+                        <input
+                          value={amount}
+                          onChange={(e) => setAmount(e.target.value)}
+                          placeholder="e.g. 50000"
+                          type="number"
+                          min="0"
+                          className={inputCls}
+                        />
+                      </Field>
+                      <Field label="EXPIRES AT" hint="voting closes here">
+                        <input
+                          value={expiresDate}
+                          onChange={(e) => setExpiresDate(e.target.value)}
+                          type="datetime-local"
+                          className={inputCls}
+                        />
+                      </Field>
+                    </div>
+
+                    {/* Category */}
+                    <Field label="CATEGORY">
+                      <select
+                        value={category}
+                        onChange={(e) => setCategory(Number(e.target.value))}
+                        className={inputCls}
+                      >
+                        {CATEGORY_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+
+                    {/* Rationale */}
+                    <Field
+                      label="RATIONALE"
+                      hint="stored on-chain, always public"
                     >
-                      {error}
-                    </motion.p>
-                  )}
-                </AnimatePresence>
+                      <textarea
+                        value={rationale}
+                        onChange={(e) => setRationale(e.target.value)}
+                        placeholder="Why should the DAO fund this? What's the expected outcome?"
+                        rows={3}
+                        className={`${inputCls} resize-none`}
+                      />
+                    </Field>
 
-                <motion.button
-                  onClick={handlePropose}
-                  disabled={isPending || !title || !recipient || !unlockDate}
-                  whileHover={{ scale: 1.005 }}
-                  whileTap={{ scale: 0.98 }}
-                  className="group relative w-full border border-fhenix-cyan text-fhenix-cyan py-3 text-xs font-mono tracking-[0.2em] hover:bg-fhenix-cyan hover:text-fhenix-bg transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed overflow-hidden mt-1 flex items-center justify-center gap-2"
-                >
-                  <span className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/10 to-transparent pointer-events-none" />
-                  <FileText size={11} />
-                  {isPending ? "signing & relaying..." : "SUBMIT PROPOSAL"}
-                </motion.button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Success state */}
-        <AnimatePresence>
-          {submitted && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.97 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              className="border border-fhenix-cyan/30 bg-fhenix-cyan/5 px-6 py-5 mb-8 flex items-center gap-3"
-            >
-              <CheckCircle2 size={16} className="text-fhenix-cyan shrink-0" />
-              <div>
-                <p className="text-sm text-fhenix-cyan font-mono">
-                  proposal submitted
-                </p>
-                <p className="text-[10px] text-fhenix-muted mt-0.5">
-                  routed through relayer — your address never touched the chain
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Proposals list */}
-        <motion.div
-          custom={5}
-          variants={fadeUp}
-          initial="hidden"
-          animate="show"
-        >
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-[10px] font-mono tracking-[0.2em] text-fhenix-muted flex items-center gap-2">
-              <Layers size={11} className="text-fhenix-cyan/40" />
-              ACTIVE PROPOSALS
-            </span>
-            <span className="text-[10px] font-mono text-fhenix-cyan/50 border border-fhenix-navy px-2 py-0.5">
-              {proposals.length} TOTAL
-            </span>
-          </div>
-
-          {proposals.length === 0 ? (
-            <div className="border border-fhenix-navy px-4 py-8 text-center text-fhenix-muted text-sm font-mono">
-              no proposals yet
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              {proposals.map((p, i) => (
-                <motion.div
-                  key={i}
-                  custom={i}
-                  variants={fadeUp}
-                  initial="hidden"
-                  animate="show"
-                  className="border border-fhenix-navy bg-fhenix-card px-4 py-3 hover:border-fhenix-cyan/20 transition-colors group"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-mono text-fhenix-white group-hover:text-fhenix-cyan/90 transition-colors truncate">
-                        {p.title}
-                      </div>
-                      <div className="text-xs text-fhenix-muted mt-0.5 font-mono truncate">
-                        → {p.recipient.slice(0, 6)}...{p.recipient.slice(-4)}
-                      </div>
-                      {p.rationale && (
-                        <div className="text-[11px] text-fhenix-muted/60 mt-1 line-clamp-1">
-                          {p.rationale}
-                        </div>
+                    {/* Error */}
+                    <AnimatePresence>
+                      {error && (
+                        <motion.p
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="text-[10px] text-red-400 px-1"
+                        >
+                          {error}
+                        </motion.p>
                       )}
-                    </div>
-                    <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      <span className="text-[9px] font-mono border border-fhenix-navy px-1.5 py-0.5 text-fhenix-muted tracking-widest">
-                        {CATEGORY_LABELS[p.category] ?? "Other"}
-                      </span>
-                      <span className="text-[10px] font-mono text-fhenix-navy group-hover:text-fhenix-cyan/30 transition-colors">
-                        #{String(i + 1).padStart(2, "0")}
-                      </span>
-                    </div>
+                    </AnimatePresence>
+
+                    {/* Submit */}
+                    <motion.button
+                      onClick={handlePropose}
+                      disabled={
+                        isPending ||
+                        !title ||
+                        !recipient ||
+                        !expiresDate ||
+                        !amount
+                      }
+                      whileHover={{ scale: 1.005 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="group relative w-full flex items-center justify-center gap-2 rounded-xl border border-fhenix-cyan text-fhenix-cyan py-3.5 text-xs tracking-[0.2em] font-bold hover:bg-fhenix-cyan hover:text-fhenix-bg transition-all duration-300 disabled:opacity-30 disabled:cursor-not-allowed overflow-hidden mt-1"
+                    >
+                      <span className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/10 to-transparent pointer-events-none" />
+                      <FileText size={12} />
+                      {isPending ? "signing & relaying..." : "SUBMIT PROPOSAL"}
+                    </motion.button>
                   </div>
-                </motion.div>
-              ))}
+                </GlassCard>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ── SUCCESS ── */}
+          <AnimatePresence>
+            {submitted && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.97 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <GlassCard
+                  highlight
+                  className="px-5 py-4 flex items-center gap-3"
+                >
+                  <CheckCircle2
+                    size={16}
+                    className="text-fhenix-cyan shrink-0"
+                  />
+                  <div>
+                    <p className="text-sm text-fhenix-cyan font-semibold">
+                      proposal submitted
+                    </p>
+                    <p className="text-[10px] text-fhenix-muted mt-0.5">
+                      routed through relayer — your address never touched the
+                      chain
+                    </p>
+                  </div>
+                </GlassCard>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ── PROPOSALS LIST ── */}
+          <motion.div
+            custom={5}
+            variants={fadeUp}
+            initial="hidden"
+            animate="show"
+          >
+            <div className="flex items-center justify-between mb-4 mt-2">
+              <span className="flex items-center gap-2 text-[9px] tracking-[0.25em] text-fhenix-muted font-semibold">
+                <Layers size={11} className="text-fhenix-cyan/40" />
+                RECENT PROPOSALS
+              </span>
+              <span
+                className="text-[9px] px-2 py-0.5 rounded-md"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.07)",
+                  color: "rgba(34,211,238,0.5)",
+                }}
+              >
+                {Number(openProposalCount ?? 0)}/{MAX_OPEN_PROPOSALS} OPEN
+              </span>
             </div>
-          )}
-        </motion.div>
+
+            {proposals.length === 0 ? (
+              <GlassCard className="px-4 py-10 text-center">
+                <p className="text-fhenix-muted text-sm font-mono">
+                  no proposals yet
+                </p>
+              </GlassCard>
+            ) : (
+              <div className="space-y-2">
+                {proposals.map((p, i) => (
+                  <motion.div
+                    key={p.id?.toString() ?? i}
+                    custom={i}
+                    variants={fadeUp}
+                    initial="hidden"
+                    animate="show"
+                    className="group rounded-2xl border border-white/[0.05] px-4 py-3.5 hover:border-fhenix-cyan/20 transition-all duration-200 cursor-default"
+                    style={{
+                      background: "rgba(255,255,255,0.01)",
+                      backdropFilter: "blur(16px)",
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm text-fhenix-white group-hover:text-fhenix-cyan/90 transition-colors truncate font-semibold">
+                          {p.title}
+                        </div>
+                        <div className="text-xs text-fhenix-muted mt-0.5 truncate">
+                          → {p.recipient.slice(0, 6)}...{p.recipient.slice(-4)}
+                        </div>
+                        {p.rationale && (
+                          <div className="text-[11px] text-fhenix-muted/55 mt-1.5 line-clamp-1 leading-relaxed">
+                            {p.rationale}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5 shrink-0">
+                        <span
+                          className="text-[9px] px-2 py-0.5 rounded-md tracking-widest"
+                          style={{
+                            background: "rgba(255,255,255,0.03)",
+                            border: "1px solid rgba(255,255,255,0.07)",
+                            color: "rgba(255,255,255,0.35)",
+                          }}
+                        >
+                          {CATEGORY_LABELS[p.category] ?? "Other"}
+                        </span>
+                        <span className="text-[10px] text-white/20 group-hover:text-fhenix-cyan/30 transition-colors">
+                          #{String(i + 1).padStart(2, "0")}
+                        </span>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        </div>
       </main>
     </div>
   );

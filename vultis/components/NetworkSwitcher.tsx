@@ -34,31 +34,23 @@ export function NetworkSwitcher() {
             whileHover={!isActive && !isPending ? { y: -1 } : {}}
             whileTap={!isActive && !isPending ? { scale: 0.96 } : {}}
             className={`
-              relative flex items-center gap-1.5 text-[10px] font-mono tracking-widest
-              px-2.5 py-1 border transition-all duration-200
+              relative flex items-center gap-1.5 text-[10px] tracking-widest
+              px-3 py-1.5 rounded-full border backdrop-blur-sm transition-all duration-200
               disabled:cursor-default overflow-hidden
               ${
                 isActive
-                  ? "border-fhenix-cyan text-fhenix-cyan bg-fhenix-cyan/5"
-                  : "border-fhenix-navy text-fhenix-muted hover:border-fhenix-cyan/40 hover:text-fhenix-white bg-transparent"
+                  ? "border-fhenix-cyan/60 text-fhenix-cyan bg-fhenix-cyan/[0.07] shadow-[0_0_18px_-5px_rgba(34,211,238,0.6)]"
+                  : "border-white/10 text-fhenix-muted hover:border-fhenix-cyan/30 hover:text-fhenix-white bg-white/[0.02]"
               }
             `}
           >
-            {/* active glow line at bottom */}
-            {isActive && (
-              <motion.span
-                layoutId="network-indicator"
-                className="absolute bottom-0 left-0 right-0 h-px bg-fhenix-cyan"
-              />
-            )}
-
             <AnimatePresence mode="wait">
               {isActive ? (
                 <motion.span
                   key="dot"
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
-                  className="w-1 h-1 rounded-full bg-fhenix-cyan"
+                  className="w-1.5 h-1.5 rounded-full bg-fhenix-cyan shadow-[0_0_8px_rgba(34,211,238,0.9)]"
                 />
               ) : isSwitching ? (
                 <motion.span

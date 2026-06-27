@@ -3,12 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { WalletConnect } from "./WalletConnect";
-import { PhaseTag } from "./PhaseTag";
 import { NetworkSwitcher } from "./NetworkSwitcher";
 import { useReadContract, usePublicClient, useWalletClient } from "wagmi";
 import {
-  VAULTIS_LENS_ADDRESS,
-  VAULTIS_LENS_ABI,
+  VAULTIS_ADDRESS,
+  VAULTIS_ABI,
   GOVERNANCE_TOKEN_ADDRESS,
   GOVERNANCE_TOKEN_ABI,
 } from "@/lib/config/contract";
@@ -17,15 +16,13 @@ import { parseGwei } from "viem";
 import {
   Home,
   FileText,
-  Vote,
-  BarChart2,
+  ListChecks,
   Menu,
   X,
-  ShieldCheck,
   Coins,
   Droplets,
 } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useAccount } from "wagmi";
 import { formatEther } from "viem";
@@ -33,63 +30,29 @@ import { formatEther } from "viem";
 const NAV_LINKS = [
   { href: "/", label: "Home", icon: Home },
   { href: "/propose", label: "Propose", icon: FileText },
-  { href: "/vote", label: "Vote", icon: Vote },
-  { href: "/result", label: "Results", icon: BarChart2 },
+  { href: "/proposals", label: "Proposals", icon: ListChecks },
 ];
 
-// ─── Contract countdown hook ──────────────────────────────────────────────────
-function useContractCountdown() {
-  const { data } = useReadContract({
-    address: VAULTIS_LENS_ADDRESS,
-    abi: VAULTIS_LENS_ABI,
-    functionName: "getTimeUntilNextPhase",
-    query: { refetchInterval: 30_000 },
-  });
-
-  const { data: currentPhase } = useReadContract({
-    address: VAULTIS_LENS_ADDRESS,
-    abi: VAULTIS_LENS_ABI,
-    functionName: "getCurrentPhase",
-    query: { refetchInterval: 30_000 },
-  });
-
-  type PhaseResult = readonly [string, bigint];
-  const contractSeconds = data ? Number((data as PhaseResult)[1]) : null;
-  const nextPhaseLabel = data ? (data as PhaseResult)[0] : "";
-  const phase = (currentPhase as string | undefined) ?? "";
-
-  const [remaining, setRemaining] = useState<number | null>(null);
-  const seedRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (contractSeconds === null) return;
-    if (
-      seedRef.current === null ||
-      Math.abs(contractSeconds - (remaining ?? 0)) > 2
-    ) {
-      seedRef.current = contractSeconds;
-      setRemaining(contractSeconds);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contractSeconds]);
-
-  useEffect(() => {
-    if (remaining === null || remaining <= 0) return;
-    const id = setTimeout(
-      () => setRemaining((r) => (r !== null ? r - 1 : 0)),
-      1_000
-    );
-    return () => clearTimeout(id);
-  }, [remaining]);
-
-  const activePhase =
-    phase === "Proposal" || phase === "Voting" || phase === "Veto";
-  const expired = remaining !== null && remaining <= 0 && activePhase;
-
-  return { remaining, nextPhaseLabel, phase, expired };
+// ─── Aurora pulse line — the signature motif, reused across nav/modal edges ──
+function AuroraLine({ className = "" }: { className?: string }) {
+  return (
+    <motion.div
+      aria-hidden
+      className={`pointer-events-none h-px w-full ${className}`}
+      style={{
+        backgroundImage:
+          "linear-gradient(90deg, transparent, #22d3ee, #a78bfa, #fb923c, transparent)",
+        backgroundSize: "200% 100%",
+      }}
+      animate={{ backgroundPosition: ["0% 50%", "200% 50%"] }}
+      transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+    />
+  );
 }
 
 // ─── Token balance + faucet hook ─────────────────────────────────────────────
+// balanceOf/symbol read from the token contract; faucet()/canClaimFaucet()
+// now live on Vaultis itself, since the faucet draws from its treasury balance.
 function useGovernanceToken() {
   const { address } = useAccount();
   const publicClient = usePublicClient();
@@ -115,9 +78,9 @@ function useGovernanceToken() {
   });
 
   const { data: claimData, refetch: refetchClaim } = useReadContract({
-    address: GOVERNANCE_TOKEN_ADDRESS,
-    abi: GOVERNANCE_TOKEN_ABI,
-    functionName: "canClaim",
+    address: VAULTIS_ADDRESS,
+    abi: VAULTIS_ABI,
+    functionName: "canClaimFaucet",
     args: address ? [address] : undefined,
     query: { enabled: !!address, refetchInterval: 15_000 },
   });
@@ -144,8 +107,8 @@ function useGovernanceToken() {
     try {
       const feeData = await publicClient.estimateFeesPerGas();
       const hash = await walletClient.writeContract({
-        address: GOVERNANCE_TOKEN_ADDRESS,
-        abi: GOVERNANCE_TOKEN_ABI,
+        address: VAULTIS_ADDRESS,
+        abi: VAULTIS_ABI,
         functionName: "faucet",
         account: walletClient.account,
         maxFeePerGas: feeData.maxFeePerGas
@@ -205,54 +168,52 @@ function FaucetPopup({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 px-4"
         onClick={onDismiss}
       >
         <motion.div
           key="faucet-modal"
-          initial={{ opacity: 0, scale: 0.95, y: 12 }}
+          initial={{ opacity: 0, scale: 0.94, y: 16 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 12 }}
-          transition={{ type: "spring", stiffness: 300, damping: 28 }}
+          exit={{ opacity: 0, scale: 0.94, y: 16 }}
+          transition={{ type: "spring", stiffness: 280, damping: 26 }}
           onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-sm border border-fhenix-cyan/30 bg-fhenix-bg p-8 flex flex-col items-center gap-5 text-center"
+          className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-white/10 bg-fhenix-bg/70  p-8 flex flex-col items-center gap-5 text-center shadow-[0_0_60px_-15px_rgba(34,211,238,0.35)]"
         >
-          {/* Icon */}
-          <div className="w-12 h-12 rounded-full border border-fhenix-cyan/30 flex items-center justify-center bg-fhenix-cyan/5">
-            <Droplets size={22} className="text-fhenix-cyan" />
+          <AuroraLine className="absolute top-0 left-0" />
+
+          <div className="w-14 h-14 rounded-full border border-fhenix-cyan/30 bg-fhenix-cyan/10 flex items-center justify-center shadow-[0_0_30px_-5px_rgba(34,211,238,0.5)]">
+            <Droplets size={24} className="text-fhenix-cyan" />
           </div>
 
-          {/* Heading */}
           <div>
-            <div className="text-[10px] font-mono tracking-[0.3em] text-fhenix-cyan/50 mb-2">
+            <div className="text-[10px] tracking-[0.3em] text-fhenix-cyan/50 mb-2">
               GOVERNANCE ACCESS
             </div>
-            <h2 className="text-lg font-mono font-bold text-fhenix-white">
+            <h2 className="text-lg font-bold text-fhenix-white">
               You have no {symbol}
             </h2>
-            <p className="text-xs font-mono text-fhenix-muted mt-2 leading-relaxed max-w-[260px]">
+            <p className="text-xs text-fhenix-muted mt-2 leading-relaxed max-w-[260px]">
               You need <span className="text-fhenix-cyan">{symbol}</span> tokens
               to submit proposals and vote. Claim 10 free tokens from the
-              testnet faucet.
+              treasury faucet.
             </p>
           </div>
 
-          {/* Error */}
           {claimError && (
-            <p className="text-[10px] font-mono text-red-400 max-w-[260px]">
+            <p className="text-[10px] text-red-400 max-w-[260px]">
               {claimError}
             </p>
           )}
 
-          {/* Success */}
           {claimSuccess ? (
             <div className="flex flex-col items-center gap-3">
-              <p className="text-[11px] font-mono text-fhenix-cyan">
+              <p className="text-[11px] text-fhenix-cyan">
                 ✓ 10 {symbol} claimed successfully
               </p>
               <button
                 onClick={onDismiss}
-                className="border border-fhenix-navy text-fhenix-muted px-5 py-2 text-[10px] font-mono tracking-widest hover:border-fhenix-cyan/30 hover:text-fhenix-white transition-all duration-200"
+                className="rounded-lg border border-white/10 text-fhenix-muted px-5 py-2 text-[10px] tracking-widest hover:border-fhenix-cyan/30 hover:text-fhenix-white transition-all duration-200"
               >
                 CLOSE
               </button>
@@ -262,16 +223,16 @@ function FaucetPopup({
               <motion.button
                 onClick={onClaim}
                 disabled={isClaiming}
-                whileHover={{ scale: 1.01 }}
+                whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="w-full border border-fhenix-cyan text-fhenix-cyan py-2.5 text-[11px] font-mono tracking-widest hover:bg-fhenix-cyan hover:text-fhenix-bg transition-all duration-200 disabled:opacity-40 flex items-center justify-center gap-2"
+                className="w-full rounded-lg border border-fhenix-cyan/60 bg-fhenix-cyan/10 text-fhenix-cyan py-2.5 text-[11px] tracking-widest hover:bg-fhenix-cyan hover:text-fhenix-bg hover:shadow-[0_0_25px_-3px_rgba(34,211,238,0.7)] transition-all duration-200 disabled:opacity-40 flex items-center justify-center gap-2"
               >
                 <Droplets size={12} />
                 {isClaiming ? "CLAIMING..." : `OKAY — GET 10 ${symbol}`}
               </motion.button>
               <button
                 onClick={onDismiss}
-                className="w-full border border-fhenix-navy text-fhenix-muted/50 py-2 text-[10px] font-mono tracking-widest hover:text-fhenix-muted transition-all duration-200"
+                className="w-full rounded-lg border border-white/5 text-fhenix-muted/50 py-2 text-[10px] tracking-widest hover:text-fhenix-muted transition-all duration-200"
               >
                 DISMISS
               </button>
@@ -302,71 +263,32 @@ function NavLink({
     <Link
       href={href}
       onClick={onClick}
-      className={`
-        group relative flex items-center gap-1.5
-        text-[11px] font-mono tracking-[0.18em] uppercase
-        transition-colors duration-200
-        ${
-          active
-            ? "text-fhenix-cyan"
-            : "text-fhenix-white/60 hover:text-fhenix-white"
-        }
-      `}
+      className="group relative flex items-center"
     >
-      <Icon
-        size={12}
-        strokeWidth={1.75}
-        className={`transition-colors duration-200 ${
-          active ? "text-fhenix-cyan" : "group-hover:text-fhenix-cyan/70"
-        }`}
-      />
-      {label}
       {active && (
         <motion.span
-          layoutId="nav-underline"
-          className="absolute -bottom-1 left-0 right-0 h-px bg-fhenix-cyan"
-          transition={{ type: "spring", stiffness: 380, damping: 30 }}
+          layoutId="nav-pill"
+          className="absolute inset-0 -mx-3 -my-1.5 rounded-full bg-fhenix-cyan/10 border border-fhenix-cyan/30 shadow-[0_0_20px_-4px_rgba(34,211,238,0.6)]"
+          transition={{ type: "spring", stiffness: 380, damping: 32 }}
         />
       )}
+      <span
+        className={`relative z-10 flex items-center gap-1.5 px-3 py-1.5 text-[11px] tracking-[0.18em] uppercase transition-colors duration-200 ${
+          active
+            ? "text-fhenix-cyan"
+            : "text-fhenix-white/55 hover:text-fhenix-white"
+        }`}
+      >
+        <Icon
+          size={12}
+          strokeWidth={1.75}
+          className={`transition-colors duration-200 ${
+            active ? "text-fhenix-cyan" : "group-hover:text-fhenix-cyan/70"
+          }`}
+        />
+        {label}
+      </span>
     </Link>
-  );
-}
-
-// ─── Countdown pill ───────────────────────────────────────────────────────────
-function CountdownPill({
-  remaining,
-  nextPhaseLabel,
-  className,
-}: {
-  remaining: number | null;
-  nextPhaseLabel: string;
-  className?: string;
-}) {
-  if (remaining === null || remaining <= 0 || nextPhaseLabel === "")
-    return null;
-
-  const urgent = remaining <= 60;
-  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
-  const ss = String(remaining % 60).padStart(2, "0");
-
-  return (
-    <motion.div
-      animate={urgent ? { scale: [1, 1.05, 1] } : {}}
-      transition={{ repeat: Infinity, duration: 0.8 }}
-      className={`
-        flex items-center gap-1.5 font-mono text-[10px] tracking-widest
-        px-2 py-1 border rounded-sm
-        ${
-          urgent
-            ? "border-red-500/70 text-red-400 bg-red-500/10"
-            : "border-fhenix-navy/60 text-fhenix-white/40"
-        }
-        ${className ?? ""}
-      `}
-    >
-      <span className={urgent ? "animate-pulse" : ""}>⏱</span>
-      {mm}:{ss}
-    </motion.div>
   );
 }
 
@@ -390,29 +312,27 @@ function TokenBalancePill({
 
   return (
     <div className="flex items-center gap-2">
-      {/* Balance */}
-      <div className="flex items-center gap-1.5 border border-fhenix-navy bg-fhenix-card px-2.5 py-1 text-[10px] font-mono">
-        <Coins size={9} className="text-fhenix-cyan/50" />
+      <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[10px] font-mono">
+        <Coins size={9} className="text-fhenix-cyan/60" />
         <span className="text-fhenix-white tabular-nums">
           {formattedBalance}
         </span>
         <span className="text-fhenix-muted/50">{symbol}</span>
       </div>
 
-      {/* Faucet */}
       {eligible ? (
         <motion.button
           onClick={onClaim}
           disabled={isClaiming}
-          whileHover={{ scale: 1.03 }}
-          whileTap={{ scale: 0.97 }}
-          className="flex items-center gap-1 border border-fhenix-cyan/50 text-fhenix-cyan px-2.5 py-1 text-[10px] font-mono tracking-widest hover:bg-fhenix-cyan hover:text-fhenix-bg transition-all duration-200 disabled:opacity-40"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.96 }}
+          className="flex items-center gap-1 rounded-full border border-fhenix-cyan/50 bg-fhenix-cyan/5 text-fhenix-cyan px-2.5 py-1 text-[10px] tracking-widest hover:bg-fhenix-cyan hover:text-fhenix-bg hover:shadow-[0_0_18px_-3px_rgba(34,211,238,0.7)] transition-all duration-200 disabled:opacity-40"
         >
           <Droplets size={9} />
           {isClaiming ? "..." : "+10"}
         </motion.button>
       ) : (
-        <div className="flex items-center gap-1 border border-fhenix-navy px-2.5 py-1 text-[10px] font-mono text-fhenix-muted/30">
+        <div className="flex items-center gap-1 rounded-full border border-white/5 px-2.5 py-1 text-[10px] text-fhenix-muted/30">
           <Droplets size={9} />
           {hoursLeft}h
         </div>
@@ -425,8 +345,6 @@ function TokenBalancePill({
 export function Navbar() {
   const [open, setOpen] = useState(false);
   const [popupDismissed, setPopupDismissed] = useState(false);
-  const { remaining, nextPhaseLabel, expired } = useContractCountdown();
-  const urgent = remaining !== null && remaining <= 60;
   const { address } = useAccount();
 
   const {
@@ -463,35 +381,39 @@ export function Navbar() {
       )}
 
       <motion.nav
-        initial={{ opacity: 0, y: -12 }}
+        initial={{ opacity: 0, y: -16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-fhenix-navy bg-fhenix-bg/80 backdrop-blur-md sticky top-0 z-50"
+        transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        className="relative flex items-center justify-between px-4 sm:px-6 py-4 bg-fhenix-bg/60 sticky top-0 z-50"
       >
         {/* ── Left: brand ────────────────────────────────── */}
         <div className="flex items-center gap-3">
           <motion.div
             whileHover={{ rotate: -8, scale: 1.1 }}
             transition={{ type: "spring", stiffness: 300 }}
+            className="rounded-full p-0.5 shadow-[0_0_16px_-4px_rgba(34,211,238,0.6)]"
           >
             <Image src="/logo.png" alt="Vaultis" width={28} height={28} />
           </motion.div>
 
           <Link href="/" className="group flex items-center gap-3">
-            <span className="text-xs font-mono font-bold tracking-[0.25em] text-fhenix-white group-hover:text-fhenix-cyan transition-colors duration-300">
+            <span
+              className="text-xs font-bold tracking-[0.25em] bg-clip-text text-transparent transition-all duration-300"
+              style={{
+                backgroundImage:
+                  "linear-gradient(90deg, #e7faff, #67e8f9, #e7faff)",
+              }}
+            >
               VAULTIS
             </span>
-            <span className="hidden sm:inline text-[10px] font-mono text-fhenix-navy border border-fhenix-navy px-1.5 py-0.5 tracking-widest group-hover:border-fhenix-cyan/40 group-hover:text-fhenix-cyan/60 transition-all duration-300">
+            <span className="hidden sm:inline text-[10px] text-fhenix-white/30 border border-white/10 rounded-full px-2 py-0.5 tracking-widest group-hover:border-fhenix-cyan/40 group-hover:text-fhenix-cyan/60 transition-all duration-300">
               PRIVATE TREASURY
             </span>
           </Link>
-
-          <div className="w-px h-4 bg-fhenix-navy mx-1" />
-          <PhaseTag />
         </div>
 
         {/* ── Centre: desktop nav links ──────────────────── */}
-        <div className="hidden md:flex items-center gap-6">
+        <div className="hidden md:flex items-center gap-1">
           {NAV_LINKS.map((l) => (
             <NavLink key={l.href} {...l} />
           ))}
@@ -499,14 +421,7 @@ export function Navbar() {
 
         {/* ── Right: controls ────────────────────────────── */}
         <div className="flex items-center gap-3">
-          <CountdownPill
-            remaining={remaining}
-            nextPhaseLabel={nextPhaseLabel}
-            className="hidden sm:flex"
-          />
-
           <div className="hidden md:flex items-center gap-3">
-            {/* Token balance + faucet */}
             <TokenBalancePill
               formattedBalance={formattedBalance}
               symbol={symbol}
@@ -516,51 +431,29 @@ export function Navbar() {
               onClaim={handleClaim}
             />
 
-            <div className="w-px h-4 bg-fhenix-navy" />
+            <div className="w-px h-4 bg-white/10" />
             <NetworkSwitcher />
-            <div className="w-px h-4 bg-fhenix-navy" />
+            <div className="w-px h-4 bg-white/10" />
             <WalletConnect />
           </div>
 
           {/* Mobile hamburger */}
-          <button
+          <motion.button
             onClick={() => setOpen((v) => !v)}
+            whileTap={{ scale: 0.9 }}
             aria-label="Toggle menu"
-            className="md:hidden text-fhenix-white/60 hover:text-fhenix-white transition-colors"
+            className="md:hidden rounded-full border border-white/10 p-2 text-fhenix-white/60 hover:text-fhenix-white hover:border-fhenix-cyan/30 transition-colors"
           >
             {open ? (
-              <X size={18} strokeWidth={1.5} />
+              <X size={16} strokeWidth={1.5} />
             ) : (
-              <Menu size={18} strokeWidth={1.5} />
+              <Menu size={16} strokeWidth={1.5} />
             )}
-          </button>
+          </motion.button>
         </div>
-      </motion.nav>
 
-      {/* ── Phase-expired reload prompt ─────────────────── */}
-      <AnimatePresence>
-        {expired && (
-          <motion.div
-            key="reload-prompt"
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.25 }}
-            className="sticky top-[57px] z-40 flex items-center justify-between gap-4 px-5 py-2.5 bg-fhenix-bg border-b border-fhenix-cyan/30 text-[11px] font-mono"
-          >
-            <span className="text-fhenix-cyan/70 tracking-widest flex items-center gap-2">
-              <ShieldCheck size={11} />
-              PHASE ENDED — RELOAD TO SEE UPDATED STATE
-            </span>
-            <button
-              onClick={() => window.location.reload()}
-              className="border border-fhenix-cyan text-fhenix-cyan px-3 py-1 tracking-widest hover:bg-fhenix-cyan hover:text-fhenix-bg transition-all duration-200"
-            >
-              RELOAD
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        <AuroraLine className="absolute bottom-0 left-0" />
+      </motion.nav>
 
       {/* ── Mobile drawer ───────────────────────────────── */}
       <AnimatePresence>
@@ -570,41 +463,23 @@ export function Navbar() {
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.25, ease: "easeInOut" }}
-            className="md:hidden overflow-hidden border-b border-fhenix-navy bg-fhenix-bg/95 backdrop-blur-md z-40"
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            className="md:hidden overflow-hidden bg-fhenix-bg/80  border-b border-white/10 z-40"
           >
             <div className="flex flex-col gap-1 px-5 py-4">
               {NAV_LINKS.map((l, i) => (
                 <motion.div
                   key={l.href}
-                  initial={{ opacity: 0, x: -10 }}
+                  initial={{ opacity: 0, x: -12 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.06 }}
+                  transition={{ delay: i * 0.06, ease: "easeOut" }}
                 >
                   <NavLink {...l} onClick={() => setOpen(false)} />
                 </motion.div>
               ))}
 
-              <div className="my-3 h-px bg-fhenix-navy" />
+              <div className="my-3 h-px bg-white/10" />
 
-              {/* Countdown in mobile drawer */}
-              {remaining !== null && remaining > 0 && nextPhaseLabel !== "" && (
-                <div
-                  className={`flex items-center gap-2 font-mono text-[10px] tracking-widest mb-3 ${
-                    urgent ? "text-red-400" : "text-fhenix-white/40"
-                  }`}
-                >
-                  <span>UNTIL {nextPhaseLabel.toUpperCase()}</span>
-                  <span
-                    className={`tabular-nums ${urgent ? "animate-pulse" : ""}`}
-                  >
-                    {String(Math.floor((remaining ?? 0) / 60)).padStart(2, "0")}
-                    :{String((remaining ?? 0) % 60).padStart(2, "0")}
-                  </span>
-                </div>
-              )}
-
-              {/* Token balance in mobile drawer */}
               <div className="mb-3">
                 <TokenBalancePill
                   formattedBalance={formattedBalance}

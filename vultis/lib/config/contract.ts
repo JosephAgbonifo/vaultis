@@ -25,24 +25,14 @@ export const VAULTIS_ABI = [
         name: "_governanceToken",
         type: "address",
       },
-      {
-        internalType: "uint64",
-        name: "_defaultProposalDuration",
-        type: "uint64",
-      },
-      {
-        internalType: "uint64",
-        name: "_defaultVoteDuration",
-        type: "uint64",
-      },
-      {
-        internalType: "uint64",
-        name: "_defaultVetoDuration",
-        type: "uint64",
-      },
     ],
     stateMutability: "nonpayable",
     type: "constructor",
+  },
+  {
+    inputs: [],
+    name: "AlreadyResolved",
+    type: "error",
   },
   {
     inputs: [],
@@ -52,6 +42,11 @@ export const VAULTIS_ABI = [
   {
     inputs: [],
     name: "CapReached",
+    type: "error",
+  },
+  {
+    inputs: [],
+    name: "FaucetCooldown",
     type: "error",
   },
   {
@@ -77,49 +72,12 @@ export const VAULTIS_ABI = [
   },
   {
     inputs: [],
-    name: "NotFinished",
+    name: "NotExpiredYet",
     type: "error",
   },
   {
     inputs: [],
-    name: "NotProposalPhase",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "NotTallyPhase",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "NotVetoPhase",
-    type: "error",
-  },
-  {
-    inputs: [],
-    name: "NotVotingPhase",
-    type: "error",
-  },
-  {
-    inputs: [
-      {
-        internalType: "address",
-        name: "owner",
-        type: "address",
-      },
-    ],
-    name: "OwnableInvalidOwner",
-    type: "error",
-  },
-  {
-    inputs: [
-      {
-        internalType: "address",
-        name: "account",
-        type: "address",
-      },
-    ],
-    name: "OwnableUnauthorizedAccount",
+    name: "ResolutionNotRequested",
     type: "error",
   },
   {
@@ -135,7 +93,7 @@ export const VAULTIS_ABI = [
   },
   {
     inputs: [],
-    name: "Unauthorized",
+    name: "TreasuryInsufficient",
     type: "error",
   },
   {
@@ -149,32 +107,13 @@ export const VAULTIS_ABI = [
       {
         indexed: true,
         internalType: "uint256",
-        name: "cycleId",
-        type: "uint256",
-      },
-      {
-        indexed: false,
-        internalType: "uint256",
-        name: "approvedCount",
-        type: "uint256",
-      },
-    ],
-    name: "AllocationsPublished",
-    type: "event",
-  },
-  {
-    anonymous: false,
-    inputs: [
-      {
-        indexed: true,
-        internalType: "uint256",
-        name: "cycleId",
+        name: "proposalId",
         type: "uint256",
       },
       {
         indexed: true,
         internalType: "address",
-        name: "voter",
+        name: "caller",
         type: "address",
       },
     ],
@@ -186,68 +125,18 @@ export const VAULTIS_ABI = [
     inputs: [
       {
         indexed: true,
-        internalType: "uint256",
-        name: "cycleId",
-        type: "uint256",
-      },
-      {
-        indexed: false,
-        internalType: "string",
-        name: "reason",
-        type: "string",
-      },
-    ],
-    name: "CycleAbandoned",
-    type: "event",
-  },
-  {
-    anonymous: false,
-    inputs: [
-      {
-        indexed: true,
-        internalType: "uint256",
-        name: "cycleId",
-        type: "uint256",
-      },
-      {
-        indexed: false,
-        internalType: "string",
-        name: "label",
-        type: "string",
-      },
-      {
-        indexed: false,
-        internalType: "uint64",
-        name: "proposalEndsAt",
-        type: "uint64",
-      },
-      {
-        indexed: false,
-        internalType: "uint64",
-        name: "voteEndsAt",
-        type: "uint64",
-      },
-    ],
-    name: "CycleOpened",
-    type: "event",
-  },
-  {
-    anonymous: false,
-    inputs: [
-      {
-        indexed: true,
         internalType: "address",
-        name: "previousOwner",
+        name: "to",
         type: "address",
       },
       {
-        indexed: true,
-        internalType: "address",
-        name: "newOwner",
-        type: "address",
+        indexed: false,
+        internalType: "uint256",
+        name: "amount",
+        type: "uint256",
       },
     ],
-    name: "OwnershipTransferred",
+    name: "FaucetClaimed",
     type: "event",
   },
   {
@@ -256,17 +145,29 @@ export const VAULTIS_ABI = [
       {
         indexed: true,
         internalType: "uint256",
-        name: "cycleId",
+        name: "proposalId",
         type: "uint256",
       },
       {
         indexed: false,
-        internalType: "enum Vaultis.Phase",
-        name: "newPhase",
+        internalType: "enum Vaultis.Status",
+        name: "status",
         type: "uint8",
       },
+      {
+        indexed: false,
+        internalType: "uint64",
+        name: "forCount",
+        type: "uint64",
+      },
+      {
+        indexed: false,
+        internalType: "uint64",
+        name: "againstCount",
+        type: "uint64",
+      },
     ],
-    name: "PhaseAdvanced",
+    name: "ProposalResolved",
     type: "event",
   },
   {
@@ -274,12 +175,6 @@ export const VAULTIS_ABI = [
     inputs: [
       {
         indexed: true,
-        internalType: "uint256",
-        name: "cycleId",
-        type: "uint256",
-      },
-      {
-        indexed: false,
         internalType: "uint256",
         name: "proposalId",
         type: "uint256",
@@ -289,6 +184,12 @@ export const VAULTIS_ABI = [
         internalType: "address",
         name: "proposer",
         type: "address",
+      },
+      {
+        indexed: false,
+        internalType: "uint64",
+        name: "expiresAt",
+        type: "uint64",
       },
     ],
     name: "ProposalSubmitted",
@@ -300,35 +201,16 @@ export const VAULTIS_ABI = [
       {
         indexed: true,
         internalType: "uint256",
-        name: "cycleId",
-        type: "uint256",
-      },
-    ],
-    name: "TallyFinalized",
-    type: "event",
-  },
-  {
-    anonymous: false,
-    inputs: [
-      {
-        indexed: true,
-        internalType: "uint256",
-        name: "cycleId",
-        type: "uint256",
-      },
-      {
-        indexed: false,
-        internalType: "uint256",
         name: "proposalId",
         type: "uint256",
       },
     ],
-    name: "VetoCast",
+    name: "ResolutionRequested",
     type: "event",
   },
   {
     inputs: [],
-    name: "MAX_PROPOSALS",
+    name: "FAUCET_AMOUNT",
     outputs: [
       {
         internalType: "uint256",
@@ -341,93 +223,12 @@ export const VAULTIS_ABI = [
   },
   {
     inputs: [],
-    name: "QUORUM_BPS",
+    name: "FAUCET_COOLDOWN",
     outputs: [
-      {
-        internalType: "uint16",
-        name: "",
-        type: "uint16",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "string",
-        name: "reason",
-        type: "string",
-      },
-    ],
-    name: "abandonCycle",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
       {
         internalType: "uint256",
         name: "",
         type: "uint256",
-      },
-    ],
-    name: "archive",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "cycleId",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "approvedCount",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "rejectedCount",
-        type: "uint256",
-      },
-      {
-        internalType: "uint64",
-        name: "totalAllocated",
-        type: "uint64",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "uint256",
-        name: "i",
-        type: "uint256",
-      },
-    ],
-    name: "archiveAt",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "cid",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "approvedCount",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "rejectedCount",
-        type: "uint256",
-      },
-      {
-        internalType: "uint64",
-        name: "totalAllocated",
-        type: "uint64",
       },
     ],
     stateMutability: "view",
@@ -435,7 +236,7 @@ export const VAULTIS_ABI = [
   },
   {
     inputs: [],
-    name: "archiveLength",
+    name: "MAX_OPEN_PROPOSALS",
     outputs: [
       {
         internalType: "uint256",
@@ -448,15 +249,66 @@ export const VAULTIS_ABI = [
   },
   {
     inputs: [
+      {
+        internalType: "address",
+        name: "user",
+        type: "address",
+      },
+    ],
+    name: "canClaimFaucet",
+    outputs: [
+      {
+        internalType: "bool",
+        name: "eligible",
+        type: "bool",
+      },
+      {
+        internalType: "uint256",
+        name: "cooldownEndsAt",
+        type: "uint256",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint256",
+        name: "proposalId",
+        type: "uint256",
+      },
       {
         internalType: "bytes32",
         name: "nullifier",
         type: "bytes32",
       },
       {
-        internalType: "uint256[]",
-        name: "proposalIds",
-        type: "uint256[]",
+        components: [
+          {
+            internalType: "uint256",
+            name: "ctHash",
+            type: "uint256",
+          },
+          {
+            internalType: "uint8",
+            name: "securityZone",
+            type: "uint8",
+          },
+          {
+            internalType: "uint8",
+            name: "utype",
+            type: "uint8",
+          },
+          {
+            internalType: "bytes",
+            name: "signature",
+            type: "bytes",
+          },
+        ],
+        internalType: "struct InEuint64",
+        name: "encForWeight",
+        type: "tuple",
       },
       {
         components: [
@@ -481,36 +333,9 @@ export const VAULTIS_ABI = [
             type: "bytes",
           },
         ],
-        internalType: "struct InEuint64[]",
-        name: "encForWeights",
-        type: "tuple[]",
-      },
-      {
-        components: [
-          {
-            internalType: "uint256",
-            name: "ctHash",
-            type: "uint256",
-          },
-          {
-            internalType: "uint8",
-            name: "securityZone",
-            type: "uint8",
-          },
-          {
-            internalType: "uint8",
-            name: "utype",
-            type: "uint8",
-          },
-          {
-            internalType: "bytes",
-            name: "signature",
-            type: "bytes",
-          },
-        ],
-        internalType: "struct InEuint64[]",
-        name: "encAgainstWeights",
-        type: "tuple[]",
+        internalType: "struct InEuint64",
+        name: "encAgainstWeight",
+        type: "tuple",
       },
     ],
     name: "castBallot",
@@ -520,185 +345,7 @@ export const VAULTIS_ABI = [
   },
   {
     inputs: [],
-    name: "cycleId",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
-    name: "cycleProposals",
-    outputs: [
-      {
-        internalType: "address",
-        name: "recipient",
-        type: "address",
-      },
-      {
-        internalType: "address",
-        name: "token",
-        type: "address",
-      },
-      {
-        internalType: "uint64",
-        name: "encAmountHint",
-        type: "uint64",
-      },
-      {
-        internalType: "uint64",
-        name: "unlockAt",
-        type: "uint64",
-      },
-      {
-        internalType: "string",
-        name: "title",
-        type: "string",
-      },
-      {
-        internalType: "string",
-        name: "rationale",
-        type: "string",
-      },
-      {
-        internalType: "enum Vaultis.Category",
-        name: "category",
-        type: "uint8",
-      },
-      {
-        internalType: "address",
-        name: "proposer",
-        type: "address",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "uint256",
-        name: "cid",
-        type: "uint256",
-      },
-    ],
-    name: "cycleProposalsLength",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "defaultProposalDuration",
-    outputs: [
-      {
-        internalType: "uint64",
-        name: "",
-        type: "uint64",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "defaultVetoDuration",
-    outputs: [
-      {
-        internalType: "uint64",
-        name: "",
-        type: "uint64",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "defaultVoteDuration",
-    outputs: [
-      {
-        internalType: "uint64",
-        name: "",
-        type: "uint64",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
-    name: "finalAgainstCounts",
-    outputs: [
-      {
-        internalType: "uint64",
-        name: "",
-        type: "uint64",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
-    name: "finalForCounts",
-    outputs: [
-      {
-        internalType: "uint64",
-        name: "",
-        type: "uint64",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "finalize",
+    name: "faucet",
     outputs: [],
     stateMutability: "nonpayable",
     type: "function",
@@ -707,9 +354,65 @@ export const VAULTIS_ABI = [
     inputs: [
       {
         internalType: "uint256",
-        name: "cid",
+        name: "",
         type: "uint256",
       },
+    ],
+    name: "finalAgainstCount",
+    outputs: [
+      {
+        internalType: "uint64",
+        name: "",
+        type: "uint64",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
+      },
+    ],
+    name: "finalForCount",
+    outputs: [
+      {
+        internalType: "uint64",
+        name: "",
+        type: "uint64",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint256",
+        name: "proposalId",
+        type: "uint256",
+      },
+      {
+        internalType: "uint64",
+        name: "forCount",
+        type: "uint64",
+      },
+      {
+        internalType: "uint64",
+        name: "againstCount",
+        type: "uint64",
+      },
+    ],
+    name: "finalizeResolution",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
       {
         internalType: "uint256",
         name: "id",
@@ -719,62 +422,90 @@ export const VAULTIS_ABI = [
     name: "getProposal",
     outputs: [
       {
-        internalType: "address",
-        name: "recipient",
-        type: "address",
-      },
-      {
-        internalType: "address",
-        name: "token",
-        type: "address",
-      },
-      {
-        internalType: "uint64",
-        name: "encAmountHint",
-        type: "uint64",
-      },
-      {
-        internalType: "uint64",
-        name: "unlockAt",
-        type: "uint64",
-      },
-      {
-        internalType: "string",
-        name: "title",
-        type: "string",
-      },
-      {
-        internalType: "string",
-        name: "rationale",
-        type: "string",
-      },
-      {
-        internalType: "enum Vaultis.Category",
-        name: "category",
-        type: "uint8",
-      },
-      {
-        internalType: "address",
-        name: "proposer",
-        type: "address",
+        components: [
+          {
+            internalType: "address",
+            name: "recipient",
+            type: "address",
+          },
+          {
+            internalType: "address",
+            name: "token",
+            type: "address",
+          },
+          {
+            internalType: "uint256",
+            name: "amount",
+            type: "uint256",
+          },
+          {
+            internalType: "uint64",
+            name: "expiresAt",
+            type: "uint64",
+          },
+          {
+            internalType: "string",
+            name: "title",
+            type: "string",
+          },
+          {
+            internalType: "string",
+            name: "rationale",
+            type: "string",
+          },
+          {
+            internalType: "enum Vaultis.Category",
+            name: "category",
+            type: "uint8",
+          },
+          {
+            internalType: "address",
+            name: "proposer",
+            type: "address",
+          },
+          {
+            internalType: "bool",
+            name: "resolutionRequested",
+            type: "bool",
+          },
+          {
+            internalType: "bool",
+            name: "resolved",
+            type: "bool",
+          },
+          {
+            internalType: "enum Vaultis.Status",
+            name: "status",
+            type: "uint8",
+          },
+        ],
+        internalType: "struct Vaultis.Proposal",
+        name: "",
+        type: "tuple",
       },
     ],
     stateMutability: "view",
     type: "function",
   },
   {
-    inputs: [],
+    inputs: [
+      {
+        internalType: "uint256",
+        name: "id",
+        type: "uint256",
+      },
+    ],
     name: "getTallyHandles",
     outputs: [
       {
-        internalType: "uint256[]",
-        name: "forHandles",
-        type: "uint256[]",
+        internalType: "uint256",
+        name: "forHandle",
+        type: "uint256",
       },
       {
-        internalType: "uint256[]",
-        name: "againstHandles",
-        type: "uint256[]",
+        internalType: "uint256",
+        name: "againstHandle",
+        type: "uint256",
       },
     ],
     stateMutability: "view",
@@ -796,89 +527,54 @@ export const VAULTIS_ABI = [
   {
     inputs: [
       {
-        internalType: "string",
-        name: "label",
-        type: "string",
+        internalType: "uint256",
+        name: "proposalId",
+        type: "uint256",
       },
       {
-        internalType: "uint64",
-        name: "_proposalEnd",
-        type: "uint64",
-      },
-      {
-        internalType: "uint64",
-        name: "_voteEnd",
-        type: "uint64",
-      },
-      {
-        internalType: "uint64",
-        name: "_vetoEnd",
-        type: "uint64",
+        internalType: "bytes32",
+        name: "nullifier",
+        type: "bytes32",
       },
     ],
-    name: "openCycle",
-    outputs: [],
-    stateMutability: "nonpayable",
+    name: "isNullifierUsed",
+    outputs: [
+      {
+        internalType: "bool",
+        name: "",
+        type: "bool",
+      },
+    ],
+    stateMutability: "view",
     type: "function",
   },
   {
     inputs: [
-      {
-        internalType: "string",
-        name: "label",
-        type: "string",
-      },
-    ],
-    name: "openNextCycle",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "owner",
-    outputs: [
       {
         internalType: "address",
         name: "",
         type: "address",
       },
     ],
+    name: "lastFaucetClaim",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
+      },
+    ],
     stateMutability: "view",
     type: "function",
   },
   {
     inputs: [],
-    name: "phase",
+    name: "openProposalCount",
     outputs: [
-      {
-        internalType: "enum Vaultis.Phase",
-        name: "",
-        type: "uint8",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
       {
         internalType: "uint256",
         name: "",
         type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
-    name: "proposalApproved",
-    outputs: [
-      {
-        internalType: "bool",
-        name: "",
-        type: "bool",
       },
     ],
     stateMutability: "view",
@@ -898,51 +594,69 @@ export const VAULTIS_ABI = [
     type: "function",
   },
   {
-    inputs: [],
-    name: "proposalEndsAt",
-    outputs: [
-      {
-        internalType: "uint64",
-        name: "",
-        type: "uint64",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
     inputs: [
       {
-        internalType: "uint64[]",
-        name: "forCounts",
-        type: "uint64[]",
-      },
-      {
-        internalType: "uint64[]",
-        name: "againstCounts",
-        type: "uint64[]",
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
       },
     ],
-    name: "publishAllocations",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "renounceOwnership",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "resultsPublished",
+    name: "proposals",
     outputs: [
+      {
+        internalType: "address",
+        name: "recipient",
+        type: "address",
+      },
+      {
+        internalType: "address",
+        name: "token",
+        type: "address",
+      },
+      {
+        internalType: "uint256",
+        name: "amount",
+        type: "uint256",
+      },
+      {
+        internalType: "uint64",
+        name: "expiresAt",
+        type: "uint64",
+      },
+      {
+        internalType: "string",
+        name: "title",
+        type: "string",
+      },
+      {
+        internalType: "string",
+        name: "rationale",
+        type: "string",
+      },
+      {
+        internalType: "enum Vaultis.Category",
+        name: "category",
+        type: "uint8",
+      },
+      {
+        internalType: "address",
+        name: "proposer",
+        type: "address",
+      },
       {
         internalType: "bool",
-        name: "",
+        name: "resolutionRequested",
         type: "bool",
+      },
+      {
+        internalType: "bool",
+        name: "resolved",
+        type: "bool",
+      },
+      {
+        internalType: "enum Vaultis.Status",
+        name: "status",
+        type: "uint8",
       },
     ],
     stateMutability: "view",
@@ -951,22 +665,12 @@ export const VAULTIS_ABI = [
   {
     inputs: [
       {
-        internalType: "uint64",
-        name: "p",
-        type: "uint64",
-      },
-      {
-        internalType: "uint64",
-        name: "v",
-        type: "uint64",
-      },
-      {
-        internalType: "uint64",
-        name: "x",
-        type: "uint64",
+        internalType: "uint256",
+        name: "proposalId",
+        type: "uint256",
       },
     ],
-    name: "setDefaultDurations",
+    name: "resolve",
     outputs: [],
     stateMutability: "nonpayable",
     type: "function",
@@ -984,13 +688,13 @@ export const VAULTIS_ABI = [
         type: "address",
       },
       {
-        internalType: "uint64",
-        name: "encAmountHint",
-        type: "uint64",
+        internalType: "uint256",
+        name: "amount",
+        type: "uint256",
       },
       {
         internalType: "uint64",
-        name: "unlockAt",
+        name: "expiresAt",
         type: "uint64",
       },
       {
@@ -1010,25 +714,36 @@ export const VAULTIS_ABI = [
       },
     ],
     name: "submitProposal",
-    outputs: [],
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "proposalId",
+        type: "uint256",
+      },
+    ],
     stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "treasuryBalance",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
+      },
+    ],
+    stateMutability: "view",
     type: "function",
   },
   {
     inputs: [
       {
-        internalType: "address",
-        name: "newOwner",
-        type: "address",
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
       },
-    ],
-    name: "transferOwnership",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
       {
         internalType: "bytes32",
         name: "",
@@ -1041,45 +756,6 @@ export const VAULTIS_ABI = [
         internalType: "bool",
         name: "",
         type: "bool",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "vetoEndsAt",
-    outputs: [
-      {
-        internalType: "uint64",
-        name: "",
-        type: "uint64",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "uint256",
-        name: "proposalId",
-        type: "uint256",
-      },
-    ],
-    name: "vetoProposal",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "voteEndsAt",
-    outputs: [
-      {
-        internalType: "uint64",
-        name: "",
-        type: "uint64",
       },
     ],
     stateMutability: "view",
@@ -1111,6 +787,11 @@ export const VAULTIS_LENS_ABI = [
       {
         components: [
           {
+            internalType: "uint256",
+            name: "id",
+            type: "uint256",
+          },
+          {
             internalType: "address",
             name: "recipient",
             type: "address",
@@ -1121,13 +802,13 @@ export const VAULTIS_LENS_ABI = [
             type: "address",
           },
           {
-            internalType: "uint64",
-            name: "encAmountHint",
-            type: "uint64",
+            internalType: "uint256",
+            name: "amount",
+            type: "uint256",
           },
           {
             internalType: "uint64",
-            name: "unlockAt",
+            name: "expiresAt",
             type: "uint64",
           },
           {
@@ -1150,6 +831,21 @@ export const VAULTIS_LENS_ABI = [
             name: "proposer",
             type: "address",
           },
+          {
+            internalType: "enum VaultisLens.DisplayStatus",
+            name: "displayStatus",
+            type: "uint8",
+          },
+          {
+            internalType: "uint64",
+            name: "finalForCount",
+            type: "uint64",
+          },
+          {
+            internalType: "uint64",
+            name: "finalAgainstCount",
+            type: "uint64",
+          },
         ],
         internalType: "struct VaultisLens.ProposalView[]",
         name: "out",
@@ -1160,35 +856,81 @@ export const VAULTIS_LENS_ABI = [
     type: "function",
   },
   {
-    inputs: [],
-    name: "getArchive",
+    inputs: [
+      {
+        internalType: "uint256",
+        name: "id",
+        type: "uint256",
+      },
+    ],
+    name: "getProposalView",
     outputs: [
       {
         components: [
           {
             internalType: "uint256",
-            name: "cycleId",
+            name: "id",
             type: "uint256",
           },
           {
-            internalType: "uint256",
-            name: "approvedCount",
-            type: "uint256",
+            internalType: "address",
+            name: "recipient",
+            type: "address",
+          },
+          {
+            internalType: "address",
+            name: "token",
+            type: "address",
           },
           {
             internalType: "uint256",
-            name: "rejectedCount",
+            name: "amount",
             type: "uint256",
           },
           {
             internalType: "uint64",
-            name: "totalAllocated",
+            name: "expiresAt",
+            type: "uint64",
+          },
+          {
+            internalType: "string",
+            name: "title",
+            type: "string",
+          },
+          {
+            internalType: "string",
+            name: "rationale",
+            type: "string",
+          },
+          {
+            internalType: "enum IVaultis.Category",
+            name: "category",
+            type: "uint8",
+          },
+          {
+            internalType: "address",
+            name: "proposer",
+            type: "address",
+          },
+          {
+            internalType: "enum VaultisLens.DisplayStatus",
+            name: "displayStatus",
+            type: "uint8",
+          },
+          {
+            internalType: "uint64",
+            name: "finalForCount",
+            type: "uint64",
+          },
+          {
+            internalType: "uint64",
+            name: "finalAgainstCount",
             type: "uint64",
           },
         ],
-        internalType: "struct VaultisLens.ExecutedCycleView[]",
-        name: "out",
-        type: "tuple[]",
+        internalType: "struct VaultisLens.ProposalView",
+        name: "",
+        type: "tuple",
       },
     ],
     stateMutability: "view",
@@ -1196,94 +938,12 @@ export const VAULTIS_LENS_ABI = [
   },
   {
     inputs: [],
-    name: "getCurrentPhase",
+    name: "treasuryBalance",
     outputs: [
-      {
-        internalType: "string",
-        name: "",
-        type: "string",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "getPhaseDeadlines",
-    outputs: [
-      {
-        internalType: "uint64",
-        name: "",
-        type: "uint64",
-      },
-      {
-        internalType: "uint64",
-        name: "",
-        type: "uint64",
-      },
-      {
-        internalType: "uint64",
-        name: "",
-        type: "uint64",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "getResults",
-    outputs: [
-      {
-        internalType: "string[]",
-        name: "titles",
-        type: "string[]",
-      },
-      {
-        internalType: "uint64[]",
-        name: "forCounts",
-        type: "uint64[]",
-      },
-      {
-        internalType: "uint64[]",
-        name: "againstCounts",
-        type: "uint64[]",
-      },
-      {
-        internalType: "bool[]",
-        name: "approved",
-        type: "bool[]",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "getTimeUntilNextPhase",
-    outputs: [
-      {
-        internalType: "string",
-        name: "",
-        type: "string",
-      },
       {
         internalType: "uint256",
         name: "",
         type: "uint256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "isAbandoned",
-    outputs: [
-      {
-        internalType: "bool",
-        name: "",
-        type: "bool",
       },
     ],
     stateMutability: "view",
@@ -1321,7 +981,7 @@ export const GOVERNANCE_TOKEN_ABI = [
       },
       {
         internalType: "uint256",
-        name: "initialSupply",
+        name: "totalSupply_",
         type: "uint256",
       },
     ],
@@ -1415,28 +1075,6 @@ export const GOVERNANCE_TOKEN_ABI = [
     type: "error",
   },
   {
-    inputs: [
-      {
-        internalType: "address",
-        name: "owner",
-        type: "address",
-      },
-    ],
-    name: "OwnableInvalidOwner",
-    type: "error",
-  },
-  {
-    inputs: [
-      {
-        internalType: "address",
-        name: "account",
-        type: "address",
-      },
-    ],
-    name: "OwnableUnauthorizedAccount",
-    type: "error",
-  },
-  {
     anonymous: false,
     inputs: [
       {
@@ -1467,44 +1105,6 @@ export const GOVERNANCE_TOKEN_ABI = [
       {
         indexed: true,
         internalType: "address",
-        name: "to",
-        type: "address",
-      },
-      {
-        indexed: false,
-        internalType: "uint256",
-        name: "amount",
-        type: "uint256",
-      },
-    ],
-    name: "FaucetClaimed",
-    type: "event",
-  },
-  {
-    anonymous: false,
-    inputs: [
-      {
-        indexed: true,
-        internalType: "address",
-        name: "previousOwner",
-        type: "address",
-      },
-      {
-        indexed: true,
-        internalType: "address",
-        name: "newOwner",
-        type: "address",
-      },
-    ],
-    name: "OwnershipTransferred",
-    type: "event",
-  },
-  {
-    anonymous: false,
-    inputs: [
-      {
-        indexed: true,
-        internalType: "address",
         name: "from",
         type: "address",
       },
@@ -1523,32 +1123,6 @@ export const GOVERNANCE_TOKEN_ABI = [
     ],
     name: "Transfer",
     type: "event",
-  },
-  {
-    inputs: [],
-    name: "FAUCET_AMOUNT",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "FAUCET_COOLDOWN",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
   },
   {
     inputs: [
@@ -1618,30 +1192,6 @@ export const GOVERNANCE_TOKEN_ABI = [
     type: "function",
   },
   {
-    inputs: [
-      {
-        internalType: "address",
-        name: "user",
-        type: "address",
-      },
-    ],
-    name: "canClaim",
-    outputs: [
-      {
-        internalType: "bool",
-        name: "eligible",
-        type: "bool",
-      },
-      {
-        internalType: "uint256",
-        name: "cooldownEndsAt",
-        type: "uint256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
     inputs: [],
     name: "decimals",
     outputs: [
@@ -1656,50 +1206,6 @@ export const GOVERNANCE_TOKEN_ABI = [
   },
   {
     inputs: [],
-    name: "faucet",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "address",
-        name: "",
-        type: "address",
-      },
-    ],
-    name: "lastClaimed",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "address",
-        name: "to",
-        type: "address",
-      },
-      {
-        internalType: "uint256",
-        name: "amount",
-        type: "uint256",
-      },
-    ],
-    name: "mint",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [],
     name: "name",
     outputs: [
       {
@@ -1709,26 +1215,6 @@ export const GOVERNANCE_TOKEN_ABI = [
       },
     ],
     stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "owner",
-    outputs: [
-      {
-        internalType: "address",
-        name: "",
-        type: "address",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "renounceOwnership",
-    outputs: [],
-    stateMutability: "nonpayable",
     type: "function",
   },
   {
@@ -1807,19 +1293,6 @@ export const GOVERNANCE_TOKEN_ABI = [
         type: "bool",
       },
     ],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "address",
-        name: "newOwner",
-        type: "address",
-      },
-    ],
-    name: "transferOwnership",
-    outputs: [],
     stateMutability: "nonpayable",
     type: "function",
   },
