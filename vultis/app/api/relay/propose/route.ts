@@ -4,16 +4,16 @@ import {
   createPublicClient,
   http,
   verifyTypedData,
+  isAddress,
   type Address,
+  parseEther,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
 import {
   VAULTIS_ADDRESS,
   VAULTIS_ABI,
-  VAULTIS_LENS_ADDRESS,
-  VAULTIS_LENS_ABI,
-  GOVERNANCE_TOKEN_ABI,
+  GOVERNANCE_TOKEN_ADDRESS,
 } from "@/lib/config/contract";
 
 const account = privateKeyToAccount(
@@ -38,28 +38,32 @@ const DOMAIN = {
   verifyingContract: VAULTIS_ADDRESS,
 } as const;
 
+// token is part of the signed message (kept for ABI/signature compatibility
+// with the deployed contract), but its value is never trusted from the
+// client — see tokenAddress override below.
 const PROPOSE_TYPES = {
   Propose: [
-    { name: "cycleId", type: "uint256" },
     { name: "recipient", type: "address" },
     { name: "token", type: "address" },
-    { name: "encAmountHint", type: "uint64" },
-    { name: "unlockAt", type: "uint64" },
+    { name: "amount", type: "uint256" },
+    { name: "expiresAt", type: "uint64" },
     { name: "title", type: "string" },
     { name: "rationale", type: "string" },
     { name: "category", type: "uint8" },
   ],
 } as const;
 
+const MAX_OPEN_PROPOSALS = 10;
+const MAX_TITLE_LENGTH = 120;
+const MAX_RATIONALE_LENGTH = 2000;
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
-      cycleId,
       recipient,
-      token,
-      encAmountHint,
-      unlockAt,
+      amount,
+      expiresAt,
       title,
       rationale,
       category,
@@ -68,12 +72,11 @@ export async function POST(req: NextRequest) {
     } = body;
 
     if (
-      !cycleId ||
       !recipient ||
-      token === undefined ||
-      encAmountHint === undefined ||
-      !unlockAt ||
+      !amount ||
+      !expiresAt ||
       !title ||
+      category === undefined ||
       !signature ||
       !signerAddress
     ) {
@@ -83,56 +86,82 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (typeof title !== "string" || title.trim().length === 0) {
-      return NextResponse.json({ error: "Title required" }, { status: 400 });
-    }
-
-    if (!/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
+    if (
+      !isAddress(recipient) ||
+      recipient === "0x0000000000000000000000000000000000000000"
+    ) {
       return NextResponse.json(
         { error: "Invalid recipient address" },
         { status: 400 }
       );
     }
 
+    let amountBigInt: bigint;
+    try {
+      amountBigInt = BigInt(amount);
+    } catch {
+      return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
+    }
+    if (amountBigInt <= BigInt(0)) {
+      return NextResponse.json(
+        { error: "Amount must be greater than zero" },
+        { status: 400 }
+      );
+    }
+
+    const expiresAtBigInt = BigInt(expiresAt);
+    const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
+    if (expiresAtBigInt <= nowSeconds) {
+      return NextResponse.json(
+        { error: "expiresAt must be in the future" },
+        { status: 400 }
+      );
+    }
+
     if (
-      token !== "0x0000000000000000000000000000000000000000" &&
-      !/^0x[0-9a-fA-F]{40}$/.test(token)
+      typeof title !== "string" ||
+      title.trim().length === 0 ||
+      title.length > MAX_TITLE_LENGTH
+    ) {
+      return NextResponse.json({ error: "Invalid title" }, { status: 400 });
+    }
+
+    if (
+      typeof rationale === "string" &&
+      rationale.length > MAX_RATIONALE_LENGTH
     ) {
       return NextResponse.json(
-        { error: "Invalid token address" },
+        { error: "Rationale too long" },
         { status: 400 }
       );
     }
 
-    if (typeof category !== "number" || category < 0 || category > 4) {
-      return NextResponse.json(
-        { error: "category must be 0–4" },
-        { status: 400 }
-      );
+    const categoryNum = Number(category);
+    if (!Number.isInteger(categoryNum) || categoryNum < 0 || categoryNum > 4) {
+      return NextResponse.json({ error: "Invalid category" }, { status: 400 });
     }
 
-    const unlockAtNum = Number(unlockAt);
-    if (unlockAtNum <= Math.floor(Date.now() / 1000)) {
-      return NextResponse.json(
-        { error: "unlockAt must be in the future" },
-        { status: 400 }
-      );
-    }
+    // Always use the canonical governance token address server-side,
+    // regardless of anything the client might send — this is what actually
+    // prevents a proposal from being bricked with a bad/zero token address,
+    // not just hiding the input field in the UI.
+    const tokenAddress =
+      "0x739B686CF020Ff640a2a0BaA3CE30D31980E36DD" as `0x${string}`;
 
+    // ── Verify signature ──────────────────────────────────────────────────────
     const valid = await verifyTypedData({
       address: signerAddress as Address,
       domain: DOMAIN,
       types: PROPOSE_TYPES,
       primaryType: "Propose",
       message: {
-        cycleId: BigInt(cycleId),
         recipient: recipient as Address,
-        token: token as Address,
-        encAmountHint: BigInt(encAmountHint),
-        unlockAt: BigInt(unlockAt),
+        token: tokenAddress,
+        amount: amountBigInt,
+        expiresAt: expiresAtBigInt,
         title: title.trim(),
-        rationale: rationale?.trim() ?? "",
-        category: Number(category),
+        rationale: (rationale ?? "").trim(),
+        category: categoryNum,
       },
       signature,
     });
@@ -141,63 +170,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
 
-    // cycleId stays on core contract (plain storage var).
-    const onChainCycleId = await publicClient.readContract({
+    // ── On-chain checks ───────────────────────────────────────────────────────
+    const openCount = (await publicClient.readContract({
       address: VAULTIS_ADDRESS,
       abi: VAULTIS_ABI,
-      functionName: "cycleId",
-    });
+      functionName: "openProposalCount",
+    })) as bigint;
 
-    if (BigInt(cycleId) !== onChainCycleId) {
-      return NextResponse.json({ error: "Cycle ID mismatch" }, { status: 409 });
-    }
-
-    // getCurrentPhase moved to VaultisLens.
-    const currentPhase = await publicClient.readContract({
-      address: VAULTIS_LENS_ADDRESS,
-      abi: VAULTIS_LENS_ABI,
-      functionName: "getCurrentPhase",
-    });
-
-    if (currentPhase !== "Proposal") {
+    if (openCount >= BigInt(MAX_OPEN_PROPOSALS)) {
       return NextResponse.json(
-        { error: `Not in proposal phase (current: ${currentPhase})` },
+        { error: `Open proposal cap reached (${MAX_OPEN_PROPOSALS})` },
         { status: 409 }
       );
     }
 
-    const govTokenAddress = (await publicClient.readContract({
-      address: VAULTIS_ADDRESS,
-      abi: VAULTIS_ABI,
-      functionName: "governanceToken",
-    })) as Address;
-
-    const balance = (await publicClient.readContract({
-      address: govTokenAddress,
-      abi: GOVERNANCE_TOKEN_ABI,
-      functionName: "balanceOf",
-      args: [signerAddress as Address],
-    })) as bigint;
-
-    if (balance === 0n) {
-      return NextResponse.json(
-        { error: "Signer holds no governance tokens" },
-        { status: 403 }
-      );
-    }
-
+    // ── Submit ────────────────────────────────────────────────────────────────
     const hash = await walletClient.writeContract({
       address: VAULTIS_ADDRESS,
       abi: VAULTIS_ABI,
       functionName: "submitProposal",
       args: [
         recipient as Address,
-        token as Address,
-        BigInt(encAmountHint),
-        BigInt(unlockAt),
+        tokenAddress,
+        amountBigInt,
+        expiresAtBigInt,
         title.trim(),
-        rationale?.trim() ?? "",
-        category,
+        (rationale ?? "").trim(),
+        categoryNum,
       ],
     });
 

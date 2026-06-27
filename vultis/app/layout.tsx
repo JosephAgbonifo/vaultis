@@ -1,4 +1,4 @@
-import { Space_Mono } from "next/font/google";
+import { Montserrat, Space_Mono } from "next/font/google";
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
@@ -6,6 +6,11 @@ import { Footer } from "@/components/Footer";
 
 const spaceMono = Space_Mono({
   variable: "--font-space-mono",
+  subsets: ["latin"],
+  weight: ["400", "700"],
+});
+const montserrat = Montserrat({
+  variable: "--font-montserrat",
   subsets: ["latin"],
   weight: ["400", "700"],
 });
@@ -54,10 +59,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${spaceMono.variable} h-full antialiased`}>
+    <html
+      lang="en"
+      className={`${spaceMono.variable} ${montserrat.variable} h-full antialiased`}
+    >
       <body
-        className="min-h-full flex flex-col font-mono bg-black text-white"
-        style={{ fontFamily: "var(--font-space-mono), monospace" }}
+        className="min-h-full flex flex-col font-montserrat bg-black text-white"
+        style={{ fontFamily: "var(--font-montserrat)" }}
       >
         <Providers>
           {children}
