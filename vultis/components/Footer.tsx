@@ -28,9 +28,7 @@ export function Footer() {
             size={12}
             className="text-fhenix-cyan/40 animate-pulse"
           />
-          <span>
-            © {new Date().getFullYear()} VAULTIS. ZERO-KNOWLEDGE LOGIC READY.
-          </span>
+          <span>© {new Date().getFullYear()} VAULTIS. FHE LOGIC READY.</span>
         </div>
 
         {/* Right Section — Fhenix Attribution */}
